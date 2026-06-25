@@ -25,8 +25,9 @@ jobs:
           sudo apt-get install -y \
             openjdk-17-jdk \
             autoconf automake build-essential \
+            ccache cmake \
             git gettext libffi-dev libjpeg-dev \
-            libltdl-dev libncurses5 libncursesw5 \
+            libltdl-dev \
             libssl-dev libtool pkg-config \
             python3-dev zlib1g-dev zip unzip wget
 
