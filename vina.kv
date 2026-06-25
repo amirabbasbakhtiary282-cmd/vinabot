@@ -1,0 +1,345 @@
+#:kivy 2.1.0
+#:import Window kivy.core.window.Window
+#:import Clock kivy.clock.Clock
+
+# رنگ‌های اصلی تم ماتریکس
+#:set GREEN_PRIMARY (0, 1, 0.25, 1)
+#:set GREEN_DARK (0, 0.23, 0, 1)
+#:set GREEN_BRIGHT (0.24, 1, 0.08, 1)
+#:set GREEN_LIGHT (0.69, 1, 0.69, 1)
+#:set BG_COLOR (0, 0.04, 0, 1)
+#:set BG_SECONDARY (0, 0.08, 0, 1)
+
+<LoginScreen>:
+    canvas.before:
+        Color:
+            rgba: BG_COLOR
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(40)
+        spacing: dp(20)
+
+        Widget:
+            size_hint_y: 0.3
+
+        Label:
+            text: '[color=00FF41][size=48]VINΛ[/size][/color]\n[color=39FF14][size=16]دستیار هوش مصنوعی شخصی[/size][/color]'
+            markup: True
+            size_hint_y: 0.15
+            halign: 'center'
+
+        Label:
+            text: '[color=B0FFB0]برای شروع وارد شوید[/size][/color]'
+            markup: True
+            size_hint_y: 0.05
+
+        TextInput:
+            id: username_input
+            hint_text: 'نام کاربری'
+            hint_text_color: (0, 1, 0.25, 0.5)
+            foreground_color: GREEN_PRIMARY
+            background_color: (0, 0.15, 0, 1)
+            cursor_color: GREEN_PRIMARY
+            size_hint_y: 0.08
+            font_size: dp(16)
+            multiline: False
+            padding: [dp(15), dp(10)]
+            border: [0, 0, 0, 0]
+
+        TextInput:
+            id: password_input
+            hint_text: 'رمز عبور'
+            hint_text_color: (0, 1, 0.25, 0.5)
+            foreground_color: GREEN_PRIMARY
+            background_color: (0, 0.15, 0, 1)
+            cursor_color: GREEN_PRIMARY
+            size_hint_y: 0.08
+            font_size: dp(16)
+            multiline: False
+            password: True
+            padding: [dp(15), dp(10)]
+            border: [0, 0, 0, 0]
+
+        NeonButton:
+            text: '[color=00FF41][b]ورود[/b][/color]'
+            markup: True
+            size_hint_y: 0.08
+            background_color: GREEN_DARK
+            font_size: dp(18)
+            on_press: root.do_login()
+
+        Label:
+            id: login_status
+            text: ''
+            color: (1, 0.3, 0.3, 1)
+            size_hint_y: 0.05
+
+        Widget:
+            size_hint_y: 0.2
+
+    ParticleSystem:
+        size_hint: None, None
+        size: root.size
+        pos: root.pos
+
+
+<ChatScreen>:
+    canvas.before:
+        Color:
+            rgba: BG_COLOR
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    BoxLayout:
+        orientation: 'vertical'
+
+        # هدر
+        BoxLayout:
+            size_hint_y: 0.08
+            padding: [dp(15), dp(5)]
+
+            Label:
+                text: '[color=00FF41][size=20]VINΛ[/size][/color]'
+                markup: True
+                halign: 'right'
+                size_hint_x: 0.3
+
+            Label:
+                id: model_status_label
+                text: app.model_status
+                color: GREEN_LIGHT
+                font_size: dp(10)
+                size_hint_x: 0.4
+
+            NeonButton:
+                text: '[color=00FF41]☰[/color]'
+                markup: True
+                size_hint_x: 0.15
+                background_color: (0, 0.15, 0, 1)
+                font_size: dp(20)
+                on_press: root.open_settings()
+
+            NeonButton:
+                id: wake_btn
+                text: '[color=00FF41]🎤[/color]' if not app.wake_word_active else '[color=00FF41]⚡[/color]'
+                markup: True
+                size_hint_x: 0.15
+                background_color: (0, 0.15, 0, 1)
+                font_size: dp(20)
+                on_press: root.toggle_wake_word()
+
+        # هولوگرام
+        HologramWidget:
+            id: hologram
+            size_hint_y: 0.2
+
+        # منطقه چت
+        ScrollView:
+            id: chat_scroll
+            size_hint_y: 0.52
+            do_scroll_x: False
+            bar_color: (0, 1, 0.25, 0.5)
+            bar_width: dp(3)
+
+            BoxLayout:
+                id: chat_container
+                orientation: 'vertical'
+                size_hint_y: None
+                height: self.minimum_height
+                padding: dp(10)
+                spacing: dp(8)
+
+        # موج صدا
+        SoundWaveWidget:
+            id: sound_wave
+            size_hint_y: 0.08
+            is_active: app.is_speaking
+
+        # نوار ورودی
+        BoxLayout:
+            size_hint_y: 0.12
+            padding: [dp(10), dp(5)]
+            spacing: dp(8)
+
+            TextInput:
+                id: message_input
+                hint_text: 'پیام خود را بنویسید...'
+                hint_text_color: (0, 1, 0.25, 0.4)
+                foreground_color: GREEN_PRIMARY
+                background_color: (0, 0.15, 0, 1)
+                cursor_color: GREEN_PRIMARY
+                font_size: dp(14)
+                multiline: False
+                padding: [dp(12), dp(8)]
+                border: [0, 0, 0, 0]
+                on_text_validate: root.send_message()
+
+            NeonButton:
+                id: send_btn
+                text: '[color=00FF41]►[/color]'
+                markup: True
+                size_hint_x: 0.15
+                font_size: dp(22)
+                on_press: root.send_message()
+
+            NeonButton:
+                id: mic_btn
+                text: '[color=00FF41]🎤[/color]'
+                markup: True
+                size_hint_x: 0.15
+                background_color: (0.4, 0, 0, 1) if app.is_listening else GREEN_DARK
+                font_size: dp(22)
+                on_press: root.toggle_listening()
+
+    ParticleSystem:
+        size_hint: None, None
+        size: root.size
+        pos: root.pos
+
+
+<SettingsScreen>:
+    canvas.before:
+        Color:
+            rgba: BG_COLOR
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(15)
+        spacing: dp(10)
+
+        BoxLayout:
+            size_hint_y: 0.08
+            NeonButton:
+                text: '[color=00FF41]← بازگشت[/color]'
+                markup: True
+                size_hint_x: 0.3
+                background_color: (0, 0.15, 0, 1)
+                on_press: root.go_back()
+
+            Label:
+                text: '[color=00FF41][size=18]تنظیمات[/size][/color]'
+                markup: True
+                size_hint_x: 0.7
+
+        ScrollView:
+            size_hint_y: 0.92
+            bar_color: (0, 1, 0.25, 0.5)
+
+            BoxLayout:
+                orientation: 'vertical'
+                size_hint_y: None
+                height: self.minimum_height
+                spacing: dp(10)
+
+                # بخش صدا
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(60)
+                    orientation: 'vertical'
+                    Label:
+                        text: '[color=39FF14]تنظیمات صدا[/color]'
+                        markup: True
+                        size_hint_y: 0.4
+                    BoxLayout:
+                        size_hint_y: 0.6
+                        NeonButton:
+                            text: '[color=00FF41]فعال‌سازی صوتی[/color]'
+                            markup: True
+                            on_press: root.toggle_voice()
+
+                # بخش حافظه
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(60)
+                    orientation: 'vertical'
+                    Label:
+                        text: '[color=39FF14]حافظه[/color]'
+                        markup: True
+                        size_hint_y: 0.4
+                    BoxLayout:
+                        size_hint_y: 0.6
+                        NeonButton:
+                            text: '[color=00FF41]پاک کردن تاریخچه[/color]'
+                            markup: True
+                            on_press: root.clear_history()
+
+                # بخش مدل
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(80)
+                    orientation: 'vertical'
+                    Label:
+                        text: '[color=39FF14]مدل هوش مصنوعی[/color]'
+                        markup: True
+                        size_hint_y: 0.3
+                    Label:
+                        id: model_info
+                        text: app.model_status
+                        color: GREEN_LIGHT
+                        font_size: dp(11)
+                        size_hint_y: 0.3
+                    NeonButton:
+                        text: '[color=00FF41]دانلود مدل Gemma-2-9B[/color]'
+                        markup: True
+                        size_hint_y: 0.4
+                        on_press: root.download_model()
+
+                # بخش اطلاعات
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(100)
+                    orientation: 'vertical'
+                    Label:
+                        text: '[color=39FF14]درباره وینا[/color]'
+                        markup: True
+                        size_hint_y: 0.3
+                    Label:
+                        text: '[color=B0FFB0]نسخه 1.0.0\nوینا - دستیار هوش مصنوعی شخصی\nتمام داده‌ها در گوشی ذخیره می‌شود[/color]'
+                        markup: True
+                        font_size: dp(11)
+                        size_hint_y: 0.7
+
+
+<NeonButton@Button>:
+    background_normal: ''
+    background_down: ''
+    background_color: (0, 0.23, 0, 1)
+    color: (0, 1, 0.25, 1)
+    bold: True
+    font_size: dp(14)
+    markup: True
+
+
+<HologramWidget@Widget>:
+    canvas.before:
+        Color:
+            rgba: (0, 0.04, 0, 0.5)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+
+<SoundWaveWidget@Widget>:
+    canvas.before:
+        Color:
+            rgba: (0, 0.06, 0, 0.3)
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+
+<ParticleSystem@Widget>:
+    canvas.before:
+        Color:
+            rgba: (0, 0, 0, 0)
+        Rectangle:
+            pos: self.pos
+            size: self.size
