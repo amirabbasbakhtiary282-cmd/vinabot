@@ -20,7 +20,7 @@ package.license = MIT
 
 # معماری هدف (ARM64 برای گوشی‌های جدید)
 android.archs = arm64-v8a
-android.api = 30
+android.api = 33
 android.minapi = 24
 android.ndk = 28c
 # android.sdk_path = /home/amirabbas/.buildozer/android/platform/android-sdk
@@ -30,7 +30,6 @@ android.permissions = INTERNET,RECORD_AUDIO,CAMERA,READ_EXTERNAL_STORAGE,WRITE_E
 
 # تنظیمات کامپایلر
 android.accept_sdk_license = True
-android.skip_update = True
 android.release_artifact = apk
 android.debug_artifact = apk
 
@@ -39,11 +38,7 @@ android.debug_artifact = apk
 # kivy = kivy 2.3.0+
 # python-for-android (p4a)
 
-# تنظیمات ساخت
 android.enable_r8 = False
-android.enable_dex = True
-android.enable_pil = True
-android.enable_openssl = True
 
 # منابع (فایل‌های اضافی)
 source.include_patterns = assets/*,models/*.gguf,models/vosk*,memory/*
@@ -65,16 +60,11 @@ android.gradle_dependencies =
 # فایل AndroidManifest.xml سفارشی (غیرفعال - buildozer خودش می‌سازد)
 # android.manifest = AndroidManifest.xml
 
-# تنظیمات اضافی
 android.log_level = 2
-android.compile_sdk_version = 30
-android.build_tools_version = 30.0.3
+android.compile_sdk_version = 33
+android.build_tools_version = 33.0.2
 
-# نام پکیج کامل
-android.package = org.vinabot
 
-# تنظیمات OBB (برای مدل‌های بزرگ)
-# android.obb_dir = /sdcard/Android/obb/org.vinabot/
 
 # ساخت release
 # buildozer -v android release
