@@ -1,0 +1,108 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master, 'arena/**' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # تست‌های منطقی سریع؛ اگر اینها رد شوند، بیلد ۱-۳ ساعته‌ی APK بی‌فایده است
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install lint/test tools
+        run: python -m pip install --upgrade pip pyflakes
+
+      - name: Static checks (pyflakes)
+        run: |
+          # src/ui.py یک shim سازگاری است (re-export عمدی) و import آن در
+          # main.py برای ثبت ویجت‌ها در Factory لازم است - این سه مورد
+          # هشدار مورد انتظارند و فیلتر می‌شوند؛ هر هشدار دیگری بیلد را
+          # متوقف می‌کند.
+          python -m pyflakes src/ tests/ main.py > flake.txt || true
+          grep -vE "src/ui\.py:.*(design_system)|main\.py:.*'src\.ui' imported but unused" \
+            flake.txt > flake_real.txt || true
+          if [ -s flake_real.txt ]; then
+            echo "هشدارهای غیرمنتظره:"; cat flake_real.txt; exit 1
+          fi
+
+      - name: Compile all sources
+        run: python -m compileall -q src main.py p4a-recipes
+
+      - name: Unit tests (voice pipeline, VAD, wake word, STT selection)
+        run: python -m unittest discover -s tests -v
+
+  build:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            openjdk-17-jdk \
+            autoconf automake build-essential \
+            ccache cmake \
+            git gettext libffi-dev libjpeg-dev \
+            libltdl-dev \
+            libssl-dev libtool pkg-config \
+            python3-dev zlib1g-dev zip unzip wget
+
+      - name: Cache buildozer artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.buildozer
+            .buildozer
+          key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec', 'p4a-recipes/**') }}
+          restore-keys: buildozer-${{ runner.os }}-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade Cython==0.29.36 wheel setuptools
+          pip install buildozer
+
+      - name: Build APK
+        run: |
+          set -o pipefail
+          buildozer -v android debug 2>&1 | tee build.log
+
+      - name: Summarise build failure
+        if: failure()
+        run: |
+          echo "### آخرین خطاهای بیلد" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -iE "error|failed|exception" build.log | tail -40 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vinabot-apk
+          path: |
+            bin/*.apk
+            build.log
+          retention-days: 30
+          if-no-files-found: warn
