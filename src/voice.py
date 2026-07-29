@@ -1,108 +1,84 @@
-import os
-import sys
-import json
+# -*- coding: utf-8 -*-
+"""
+ماژول صدای وینا: تشخیص گفتار (STT) و گویش متن (TTS)
+
+پیاده‌سازی واقعی:
+- روی اندروید: از android.speech.SpeechRecognizer و android.speech.tts.TextToSpeech
+  (هر دو API رسمی و داخلی سیستم‌عامل) از طریق pyjnius استفاده می‌شود.
+- خارج از اندروید (مثلاً هنگام توسعه روی دسکتاپ): از ورودی/خروجی متنی به
+  عنوان جایگزین امن استفاده می‌شود تا برنامه کرش نکند.
+
+توجه: کتابخانه‌ی Vosk به دلیل نیاز به کراس‌کامپایل پیچیده برای اندروید و
+عدم پایداری در بیلدهای p4a از این پروژه حذف شده و به‌جای آن از موتور
+تشخیص گفتار داخلی خود اندروید استفاده می‌شود که روی همه‌ی گوشی‌ها در
+دسترس است و نیازی به دانلود مدل جداگانه ندارد.
+"""
+
 import queue
-import threading
-import time
+
+from src.android_bridge import AndroidBridge, is_android
 
 
 class VinaVoice:
+    """کلاس مدیریت صدا برای وینا"""
 
     def __init__(self):
-        self.recognizer = None
-        self.tts_engine = None
-        self.audio_queue = queue.Queue()
+        self.is_android = is_android()
+        self.bridge = AndroidBridge()
         self.isListening = False
-        self.wake_word_active = False
-        self.is_android = self._check_android()
-        self._init_stt()
+        self._audio_levels = [0] * 30
 
-    def _check_android(self):
-        try:
-            return os.path.exists('/system/build.prop')
-        except Exception:
-            return False
+        if self.is_android:
+            self.bridge.set_tts_language_fa()
 
-    def _init_stt(self):
-        try:
-            from vosk import Model, KaldiRecognizer, SetLogLevel
-            SetLogLevel(-1)
-
-            model_paths = [
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models', 'vosk-model-small-fa'),
-                '/data/data/org.vinabot/files/models/vosk-model-small-fa',
-                os.path.expanduser('~/.vin/models/vosk-model-small-fa'),
-            ]
-
-            model_path = None
-            for p in model_paths:
-                if os.path.exists(p):
-                    model_path = p
-                    break
-
-            if model_path:
-                self.vosk_model = Model(model_path)
-                self.recognizer = KaldiRecognizer(self.vosk_model, 16000)
-            else:
-                self.vosk_model = None
-                self.recognizer = None
-        except ImportError:
-            self.vosk_model = None
-            self.recognizer = None
-        except Exception:
-            self.vosk_model = None
-            self.recognizer = None
-
+    # ------------------------------------------------------------------
     def speak(self, text):
+        """گویش متن با موتور TTS"""
         if not text:
-            return
-        print(f"[وینا]: {text}")
+            return False
+        return self.bridge.speak(text)
 
-    def listen(self, timeout=10):
-        try:
-            if self.recognizer and not self.is_android:
-                return self._listen_vosk(timeout)
-            else:
-                return self._listen_text_fallback()
-        except Exception as e:
-            print(f"خطای تشخیص صدا: {e}")
-            return None
+    def stop_speaking(self):
+        self.bridge.stop_speaking()
 
-    def _listen_vosk(self, timeout=10):
-        try:
-            import sounddevice as sd
+    def shutdown(self):
+        self.bridge.shutdown_tts()
 
-            self.isListening = True
+    # ------------------------------------------------------------------
+    def listen(self, timeout=10, on_partial=None):
+        """گوش می‌دهد و متن تشخیص داده‌شده را به صورت synchronous برمی‌گرداند.
 
-            def audio_callback(indata, frames, time_info, status):
-                self.audio_queue.put(bytes(indata))
-
-            with sd.RawInputStream(samplerate=16000, blocksize=8000, dtype='int16',
-                                   channels=1, callback=audio_callback):
-                start_time = time.time()
-                while time.time() - start_time < timeout:
-                    try:
-                        data = self.audio_queue.get(timeout=0.5)
-                        if self.recognizer.AcceptWaveform(data):
-                            result = json.loads(self.recognizer.Result())
-                            text = result.get('text', '')
-                            if text:
-                                self.isListening = False
-                                return text
-                    except queue.Empty:
-                        continue
-
-                final = json.loads(self.recognizer.FinalResult())
-                self.isListening = False
-                return final.get('text', '')
-        except ImportError:
-            self.isListening = False
+        این متد باید در یک ترد جداگانه (نه ترد UI) فراخوانی شود چون منتظر
+        نتیجه می‌ماند.
+        """
+        if not self.is_android:
             return self._listen_text_fallback()
-        except Exception:
+
+        result_queue = queue.Queue()
+
+        def on_result(text):
+            result_queue.put(('ok', text))
+
+        def on_error(message):
+            result_queue.put(('error', message))
+
+        self.isListening = True
+        self.bridge.listen_once(on_result, on_error, language='fa-IR', timeout_sec=timeout)
+
+        try:
+            status, payload = result_queue.get(timeout=timeout + 5)
+        except queue.Empty:
             self.isListening = False
             return None
+
+        self.isListening = False
+        if status == 'ok':
+            return payload
+        print(f"خطای تشخیص گفتار: {payload}")
+        return None
 
     def _listen_text_fallback(self):
+        """ورودی متنی جایگزین (فقط برای اجرای دسکتاپ/توسعه)"""
         try:
             text = input("پیام خود را بنویسید: ")
             return text.strip() if text.strip() else None
@@ -110,10 +86,17 @@ class VinaVoice:
             return None
 
     def listen_for_wake_word(self, wake_word="هی وینا"):
+        """تشخیص کلمه‌ی فعال‌سازی.
+
+        توجه صادقانه: تشخیص مداوم کلمه‌ی فعال‌سازی (always-on wake word)
+        نیازمند یک موتور تشخیص گفتار آفلاین سبک (مثل Porcupine یا مدل
+        فشرده‌ی محلی) است که دائم در پس‌زمینه اجرا شود. android.speech.
+        SpeechRecognizer داخلی برای این منظور طراحی نشده (هر بار به‌صورت
+        یک‌باره کار می‌کند و پنجره‌ی محدودی دارد)، و اجرای مداوم آن باتری
+        را به‌سرعت تخلیه می‌کند. به همین دلیل این قابلیت در این نسخه غیرفعال
+        است تا رفتار نادرست یا گمراه‌کننده به کاربر نشان داده نشود.
+        """
         return False
 
-    def stop_speaking(self):
-        pass
-
     def get_audio_levels(self):
-        return [0] * 30
+        return self._audio_levels

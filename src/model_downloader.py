@@ -1,56 +1,60 @@
 # -*- coding: utf-8 -*-
 """
 دانلودکننده مدل‌های هوش مصنوعی وینا
-دانلود خودکار مدل‌ها پس از نصب برنامه
+
+نکته‌ی مهم: نسخه‌ی قبلی این فایل به‌صورت پیش‌فرض مدل Gemma-2-9B با حجم
+حدود ۴.۵ گیگابایت را پیشنهاد می‌داد که روی اکثر گوشی‌های موبایل (چه از نظر
+فضای ذخیره‌سازی، چه از نظر RAM برای بارگذاری، و چه از نظر سرعت استنتاج)
+عملاً غیرقابل استفاده است. این نسخه چند مدل سبک و واقعاً مناسب برای اجرای
+آفلاین روی گوشی را پیشنهاد می‌دهد؛ اما همان‌طور که در src/brain.py هم آمده،
+موتور وینا با *هر* فایل GGUF معتبری که در پوشه‌ی models/ قرار بگیرد کار
+می‌کند - محدود به این لیست نیست.
+
+هم‌چنین ماژول Vosk (تشخیص گفتار آفلاین) از این‌جا حذف شده، چون STT اکنون
+از طریق android.speech.SpeechRecognizer داخلی سیستم‌عامل انجام می‌شود که
+نیازی به دانلود هیچ مدلی ندارد (به src/voice.py و src/android_bridge.py
+مراجعه کنید).
 """
 
 import os
-import sys
-import json
-import hashlib
 import threading
-import time
 
 
 class ModelDownloader:
-    """کلاس دانلود مدل‌ها"""
+    """کلاس دانلود مدل‌های زبانی سبک (GGUF)"""
 
-    MODELS = {
-        'gemma-2-9b-q4_k_m.gguf': {
-            'url': 'https://huggingface.co/google/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf',
-            'size': 4.5 * 1024 * 1024 * 1024,
-            'sha256': '',
-            'description': 'مدل زبانی Gemma-2-9B کوانتایز ۴ بیتی',
-            'required': True,
+    # مدل‌های پیشنهادی: همگی سبک، کوانتایز و مناسب اجرای CPU-only روی گوشی.
+    # اندازه‌ها تقریبی‌اند و به‌عنوان راهنما برای کاربر نمایش داده می‌شوند.
+    RECOMMENDED_MODELS = {
+        'qwen2.5-0.5b-instruct-q4_k_m.gguf': {
+            'url': 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf',
+            'size': 400 * 1024 * 1024,
+            'description': 'Qwen2.5-0.5B-Instruct (سبک‌ترین، مناسب گوشی‌های ضعیف)',
         },
-        'vosk-model-small-fa': {
-            'url': 'https://alphacephei.com/vosk/models/vosk-model-small-fa-0.5.zip',
-            'size': 50 * 1024 * 1024,
-            'sha256': '',
-            'description': 'مدل تشخیص گفتار فارسی Vosk',
-            'required': True,
-            'zip': True,
+        'qwen2.5-1.5b-instruct-q4_k_m.gguf': {
+            'url': 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+            'size': 1024 * 1024 * 1024,
+            'description': 'Qwen2.5-1.5B-Instruct (تعادل خوب بین کیفیت و سرعت)',
         },
-        'vosk-model-small-fa.zip': {
-            'url': 'https://alphacephei.com/vosk/models/vosk-model-small-fa-0.5.zip',
-            'size': 50 * 1024 * 1024,
-            'sha256': '',
-            'description': 'مدل تشخیص گفتار فارسی Vosk (فایل فشرده)',
-            'required': True,
-        }
+        'phi-3-mini-4k-instruct-q4.gguf': {
+            'url': 'https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf/resolve/main/Phi-3-mini-4k-instruct-q4.gguf',
+            'size': 2 * 1024 * 1024 * 1024,
+            'description': 'Phi-3-mini-4k-Instruct (کیفیت بالاتر، نیاز به گوشی قوی‌تر)',
+        },
     }
 
     def __init__(self):
         self.models_dir = self._get_models_dir()
         self.progress_callback = None
         self.status_callback = None
+        self._cancel_event = threading.Event()
 
     def _get_models_dir(self):
-        """مسیر پوشه مدل‌ها"""
+        """مسیر پوشه‌ی مدل‌ها"""
         possible_paths = [
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), 'models'),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models'),
             '/data/data/org.vinabot/files/models',
-            os.path.expanduser('~/.vin/models'),
+            os.path.expanduser('~/.vina/models'),
         ]
         for path in possible_paths:
             try:
@@ -60,50 +64,38 @@ class ModelDownloader:
                 continue
         return possible_paths[0]
 
-    def check_models(self):
-        """بررسی مدل‌های موجود"""
-        status = {}
-        for name, info in self.MODELS.items():
-            if name.endswith('.zip'):
-                continue
-            path = os.path.join(self.models_dir, name)
-            status[name] = {
-                'exists': os.path.exists(path),
-                'size': os.path.getsize(path) if os.path.exists(path) else 0,
-                'required': info['required'],
-                'description': info['description']
-            }
-        return status
+    def list_installed_models(self):
+        """لیست تمام فایل‌های GGUF موجود در پوشه‌ی مدل‌ها"""
+        if not os.path.isdir(self.models_dir):
+            return []
+        return sorted(
+            f for f in os.listdir(self.models_dir) if f.lower().endswith('.gguf')
+        )
 
-    def download_all(self):
-        """دانلود تمام مدل‌ها"""
-        threads = []
-        for name, info in self.MODELS.items():
-            if name.endswith('.zip'):
-                continue
-            path = os.path.join(self.models_dir, name)
-            if not os.path.exists(path):
-                t = threading.Thread(
-                    target=self.download_model,
-                    args=(name,),
-                    daemon=True
-                )
-                threads.append(t)
-                t.start()
+    def has_any_model(self):
+        return len(self.list_installed_models()) > 0
 
-        for t in threads:
-            t.join()
+    def cancel(self):
+        """درخواست لغو دانلود در حال انجام"""
+        self._cancel_event.set()
 
-    def download_model(self, name):
-        """دانلود یک مدل"""
-        if name not in self.MODELS:
+    def download_model(self, model_key):
+        """دانلود یک مدل از لیست پیشنهادی"""
+        if model_key not in self.RECOMMENDED_MODELS:
+            if self.status_callback:
+                self.status_callback(f"مدل ناشناخته: {model_key}")
             return False
 
-        info = self.MODELS[name]
-        path = os.path.join(self.models_dir, name)
+        info = self.RECOMMENDED_MODELS[model_key]
+        path = os.path.join(self.models_dir, model_key)
 
         if os.path.exists(path):
+            if self.status_callback:
+                self.status_callback(f"{info['description']} از قبل نصب شده است.")
             return True
+
+        self._cancel_event.clear()
+        temp_path = path + '.downloading'
 
         try:
             import requests
@@ -117,115 +109,42 @@ class ModelDownloader:
             total_size = int(response.headers.get('content-length', info['size']))
             downloaded = 0
 
-            temp_path = path + '.downloading'
-
             with open(temp_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
+                for chunk in response.iter_content(chunk_size=65536):
+                    if self._cancel_event.is_set():
+                        raise InterruptedError("دانلود توسط کاربر لغو شد")
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
-
-                        if self.progress_callback:
+                        if self.progress_callback and total_size:
                             progress = (downloaded / total_size) * 100
-                            self.progress_callback(name, progress)
+                            self.progress_callback(model_key, progress)
 
             os.rename(temp_path, path)
 
             if self.status_callback:
                 self.status_callback(f"دانلود {info['description']} تکمیل شد.")
-
             return True
 
-        except Exception as e:
+        except Exception as exc:
             if self.status_callback:
-                self.status_callback(f"خطا در دانلود {name}: {str(e)[:50]}")
-
-            temp_path = path + '.downloading'
+                self.status_callback(f"خطا در دانلود: {str(exc)[:100]}")
             if os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
-                except Exception:
+                except OSError:
                     pass
-
             return False
 
-    def download_vosk_model(self):
-        """دانلود مدل Vosk با استخراج"""
-        vosk_dir = os.path.join(self.models_dir, 'vosk-model-small-fa')
-        if os.path.exists(vosk_dir):
-            return True
-
-        zip_path = os.path.join(self.models_dir, 'vosk-model-small-fa.zip')
-
-        if not os.path.exists(zip_path):
-            success = self.download_model('vosk-model-small-fa')
-            if not success:
-                return False
-
-        try:
-            import zipfile
-            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                zip_ref.extractall(self.models_dir)
-
-            extracted = os.path.join(self.models_dir, 'vosk-model-small-fa-0.5')
-            if os.path.exists(extracted):
-                os.rename(extracted, vosk_dir)
-
-            return True
-        except Exception:
-            return False
-
-    def get_total_size(self):
-        """محاسبه حجم کل مدل‌ها"""
-        total = 0
-        for name, info in self.MODELS.items():
-            if not name.endswith('.zip'):
-                total += info['size']
-        return total
-
-    def get_downloaded_size(self):
-        """محاسبه حجم دانلود شده"""
-        total = 0
-        for name in self.MODELS:
-            if name.endswith('.zip'):
-                continue
-            path = os.path.join(self.models_dir, name)
-            if os.path.exists(path):
-                total += os.path.getsize(path)
-        return total
-
-
-def download_models_gui():
-    """رابط گرافیکی ساده برای دانلود مدل‌ها"""
-    downloader = ModelDownloader()
-
-    def on_progress(name, progress):
-        print(f"  {name}: {progress:.1f}%")
-
-    def on_status(status):
-        print(f"  [وضعیت] {status}")
-
-    downloader.progress_callback = on_progress
-    downloader.status_callback = on_status
-
-    status = downloader.check_models()
-    print("\nوضعیت مدل‌ها:")
-    for name, info in status.items():
-        status_text = "✓ موجود" if info['exists'] else "✗ نیاز به دانلود"
-        print(f"  {info['description']}: {status_text}")
-
-    missing = [n for n, s in status.items() if not s['exists'] and s['required']]
-    if missing:
-        print(f"\nمدل‌های مورد نیاز: {len(missing)}")
-        print(f"حجم کل دانلود: {downloader.get_total_size() / (1024**3):.1f} GB")
-
-        confirm = input("\nآیا می‌خواهید مدل‌ها را دانلود کنید؟ (y/n): ")
-        if confirm.lower() == 'y':
-            downloader.download_all()
-            print("دانلود تکمیل شد!")
-    else:
-        print("\nهمه مدل‌ها موجود هستند.")
-
-
-if __name__ == '__main__':
-    download_models_gui()
+    def get_recommended_list(self):
+        """اطلاعات مدل‌های پیشنهادی برای نمایش در رابط کاربری"""
+        installed = set(self.list_installed_models())
+        result = []
+        for key, info in self.RECOMMENDED_MODELS.items():
+            result.append({
+                'key': key,
+                'description': info['description'],
+                'size_mb': round(info['size'] / (1024 * 1024)),
+                'installed': key in installed,
+            })
+        return result
