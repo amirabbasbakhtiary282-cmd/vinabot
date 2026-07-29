@@ -44,9 +44,8 @@ from src.screens.auth import OnboardingScreen, LoginScreen
 from src.screens.home import HomeScreen
 from src.screens.chat import ChatScreen
 from src.screens.voice import VoiceScreen
-from src.screens.settings_hub import SettingsHubScreen
+from src.screens.settings_hub import SettingsHubScreen, SETTINGS_SECTIONS
 from src.screens.settings_detail import SettingsDetailScreen
-from src.screens.settings_sections import SETTINGS_SECTIONS
 
 Window.clearcolor = theme.bg_primary
 theme.bind(bg_primary=lambda instance, value: setattr(Window, 'clearcolor', value))

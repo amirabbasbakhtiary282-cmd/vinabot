@@ -33,6 +33,22 @@ jobs:
       - name: Install lint/test tools
         run: python -m pip install --upgrade pip pyflakes
 
+      # Kivy و وابستگی‌های خالص‌پایتون نصب می‌شوند تا تست‌های
+      # tests/test_ui_imports.py واقعاً اجرا شوند (نه skip).
+      # این تست‌ها یک کرش واقعی هنگام اجرا را گرفتند: main.py نامی را از
+      # ماژول اشتباه import می‌کرد و برنامه روی گوشی بلافاصله می‌مرد.
+      # بدون نصب Kivy، آن تست‌ها بی‌صدا skip می‌شوند و ارزششان صفر است.
+      - name: Install app dependencies (for UI import tests)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          # Kivy برای import شدن به SDL2 و یک کتابخانه‌ی GL نیاز دارد
+          sudo apt-get install -y --no-install-recommends \
+            libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
+            libsdl2-ttf-2.0-0 libgl1 libmtdev1 xvfb
+          pip install kivy==2.3.1 arabic-reshaper "python-bidi>=0.4.2,<0.5.0" \
+                      pygments requests beautifulsoup4 plyer
+
       - name: Static checks (pyflakes)
         run: |
           set -euo pipefail
@@ -50,8 +66,21 @@ jobs:
       - name: Compile all sources
         run: python -m compileall -q src main.py p4a-recipes
 
+      # xvfb-run یک صفحه‌نمایش مجازی می‌دهد؛ بدون آن Kivy در ensure_window
+      # مستقیماً sys.exit(1) می‌کند و تست‌های UI قابل اجرا نیستند.
       - name: Unit tests
-        run: python -m unittest discover -s tests -v
+        run: xvfb-run -a python -m unittest discover -s tests -v
+
+      # اطمینان از اینکه تست‌های UI واقعاً اجرا شده‌اند و skip نشده‌اند.
+      # (یک تست skip شده در گزارش سبز است ولی هیچ چیزی را تضمین نمی‌کند.)
+      - name: Ensure UI tests actually ran
+        run: |
+          set -euo pipefail
+          xvfb-run -a python -m unittest tests.test_ui_imports -v 2>&1 | tee ui.log
+          if grep -q "skipped" ui.log; then
+            echo "::error::تست‌های رابط کاربری skip شدند - Kivy درست نصب نشده است."
+            exit 1
+          fi
 
   # ---------------------------------------------------------------------
   # مرحله ۲: بیلد واقعی APK
