@@ -186,3 +186,40 @@ class TestSingleSourceOfTruth(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class TestMemoryDbPathIsWritable(unittest.TestCase):
+    """مسیر دیتابیس باید همیشه قابل نوشتن باشد.
+
+    باگ واقعی نسخه‌ی قبلی: مسیر پوشه‌ی برنامه اول امتحان می‌شد و فقط
+    ``os.path.exists`` چک می‌شد. روی اندروید آن پوشه محل استخراج APK و
+    فقط-خواندنی است، پس sqlite با «unable to open database file» شکست
+    می‌خورد - یعنی کل حافظه‌ی برنامه از کار می‌افتاد.
+    """
+
+    def test_selected_path_parent_is_writable(self):
+        import tempfile
+        from src.memory import VinaMemory
+
+        home = tempfile.mkdtemp()
+        old_home = os.environ.get('HOME')
+        os.environ['HOME'] = home
+        try:
+            memory = VinaMemory()
+            parent = os.path.dirname(memory.db_path)
+            self.assertTrue(os.path.isdir(parent), f'{parent} ساخته نشد')
+            self.assertTrue(
+                os.access(parent, os.W_OK),
+                f'پوشه‌ی دیتابیس «{parent}» قابل نوشتن نیست؛ sqlite شکست '
+                f'می‌خورد و حافظه‌ی برنامه از کار می‌افتد')
+        finally:
+            if old_home is not None:
+                os.environ['HOME'] = old_home
+
+    def test_writability_is_actually_checked(self):
+        """کد باید W_OK را بررسی کند، نه صرفاً exists را."""
+        with open(os.path.join(ROOT, 'src', 'memory.py'), encoding='utf-8') as f:
+            src = f.read()
+        self.assertIn('os.W_OK', src,
+                      'بررسی وجود پوشه کافی نیست؛ قابل نوشتن بودن هم باید '
+                      'بررسی شود')

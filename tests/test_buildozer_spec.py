@@ -137,7 +137,7 @@ class TestExcludedDirs(unittest.TestCase):
 
     def test_heavy_dirs_excluded(self):
         excluded = [d.lower() for d in _list(_config(), 'source.exclude_dirs')]
-        for name in ('tests', 'bin', 'models'):
+        for name in ('tests', 'bin', 'models', 'memory'):
             self.assertIn(name, excluded,
                           f'پوشه‌ی «{name}» نباید داخل APK کپی شود')
 

@@ -26,16 +26,50 @@ class VinaMemory:
         self.init_database()
 
     def _get_db_path(self):
-        """مسیر دیتابیس"""
-        possible_paths = [
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), 'memory', 'vina_memory.db'),
-            '/data/data/org.vinabot/files/memory/vina_memory.db',
-        ]
-        for path in possible_paths:
-            parent = os.path.dirname(path)
-            if os.path.exists(parent) or self._create_dir(parent):
-                return path
-        return possible_paths[0]
+        """مسیر دیتابیس (اولین مسیری که واقعاً قابل نوشتن است).
+
+        دو اشکال نسخه‌ی قبلی:
+
+        ۱) **ترتیب اشتباه**: مسیر پوشه‌ی برنامه اول امتحان می‌شد. روی
+           اندروید آن پوشه جایی است که سورس از APK استخراج شده و
+           **فقط-خواندنی** است. نتیجه: sqlite با
+           ``unable to open database file`` شکست می‌خورد (تست شد).
+
+        ۲) **بررسی ناکافی**: فقط ``os.path.exists(parent)`` چک می‌شد.
+           وجود داشتن یک پوشه به معنی قابل نوشتن بودنش نیست. حالا
+           صریحاً با ``os.access(..., os.W_OK)`` بررسی می‌شود.
+
+        ترتیب جدید: حافظه‌ی خصوصی برنامه (همیشه قابل نوشتن روی اندروید)
+        اول، بعد مسیرهای دسکتاپ.
+        """
+        candidates = []
+
+        # روی اندروید: حافظه‌ی خصوصی و قابل نوشتن برنامه
+        try:
+            from android.storage import app_storage_path  # type: ignore
+            candidates.append(os.path.join(app_storage_path(), 'memory'))
+        except Exception:
+            pass
+
+        # مسیر قراردادی اندروید (اگر ماژول android در دسترس نبود)
+        candidates.append('/data/data/org.vinabot/files/memory')
+
+        # دسکتاپ: کنار پروژه، سپس پوشه‌ی خانه
+        candidates.append(
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'memory'))
+        candidates.append(os.path.expanduser('~/.vina/memory'))
+
+        for parent in candidates:
+            try:
+                self._create_dir(parent)
+                if os.path.isdir(parent) and os.access(parent, os.W_OK):
+                    return os.path.join(parent, 'vina_memory.db')
+            except Exception:
+                continue
+
+        # هیچ‌کدام قابل نوشتن نبود - آخرین گزینه را برگردان تا خطای
+        # روشن‌تری از sqlite بگیریم (به‌جای برگرداندن None و کرش مبهم)
+        return os.path.join(candidates[-1], 'vina_memory.db')
 
     def _create_dir(self, path):
         """ایجاد پوشه"""

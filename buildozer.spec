@@ -59,7 +59,7 @@ source.include_patterns = assets/*
 
 # فایل‌های حجیم/غیرضروری نباید وارد بسته شوند
 source.exclude_exts = gguf,bin,zip,tar,gz,apk,aab,log
-source.exclude_dirs = tests,bin,.buildozer,ci,models,p4a-recipes,__pycache__,.github
+source.exclude_dirs = tests,bin,.buildozer,ci,models,p4a-recipes,__pycache__,.github,memory
 
 # تنظیمات P4A
 p4a.branch = master
