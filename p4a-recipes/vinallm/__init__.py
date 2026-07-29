@@ -17,6 +17,27 @@ from pythonforandroid.recipe import Recipe
 from pythonforandroid.util import current_directory, ensure_dir
 
 
+def arch_name(arch):
+    """نام معماری را برمی‌گرداند، چه شیء Arch داده شود چه رشته.
+
+    چرا این تابع لازم است؟ python-for-android در فراخوانی متدهای recipe
+    یکدست نیست (تأییدشده از pythonforandroid/build.py):
+
+        prepare_build_dir(arch)   -> **رشته**  (خط ۵۱۲: arch.arch پاس می‌شود)
+        prebuild_arch(arch)       -> شیء Arch  (خط ۵۲۲)
+        should_build(arch)        -> شیء Arch  (خط ۵۲۹)
+        build_arch(arch)          -> شیء Arch  (خط ۵۳۰)
+        install_libraries(arch)   -> شیء Arch  (خط ۵۳۳)
+
+    نوشتن ``arch.arch`` داخل prepare_build_dir باعث این خطا می‌شد:
+        AttributeError: 'str' object has no attribute 'arch'
+
+    با این تابع، هر دو حالت درست کار می‌کند و دیگر لازم نیست به خاطر
+    بسپاریم کدام متد چه چیزی می‌گیرد.
+    """
+    return arch if isinstance(arch, str) else arch.arch
+
+
 class VinaLlmRecipe(Recipe):
     version = "1.0"
     url = None
@@ -36,11 +57,12 @@ class VinaLlmRecipe(Recipe):
         return join(self.get_build_container_dir(arch), "vinallm")
 
     def prepare_build_dir(self, arch):
-        ensure_dir(self.get_build_dir(arch.arch))
+        # توجه: اینجا p4a یک *رشته* پاس می‌دهد، نه شیء Arch.
+        ensure_dir(self.get_build_dir(arch_name(arch)))
 
     def build_arch(self, arch):
         env = self.get_recipe_env(arch)
-        build_dir = self.get_build_dir(arch.arch)
+        build_dir = self.get_build_dir(arch_name(arch))
 
         src_file = self._src_file
         if not exists(src_file):
@@ -49,7 +71,7 @@ class VinaLlmRecipe(Recipe):
         info(f"Building vina_llm shim from: {src_file}")
 
         llamacpp_recipe = self.get_recipe("llamacpp", self.ctx)
-        llama_build_dir = llamacpp_recipe.get_build_dir(arch.arch)
+        llama_build_dir = llamacpp_recipe.get_build_dir(arch_name(arch))
         llama_include = join(llama_build_dir, "include")
         ggml_include = join(llama_build_dir, "ggml", "include")
         llama_lib_dir = join(llama_build_dir, "build", "bin")

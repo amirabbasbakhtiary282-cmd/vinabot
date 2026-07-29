@@ -143,11 +143,20 @@ class VinaBrain:
             info['file_size_mb'] = None
         return info
 
-    def generate_response(self, user_input, context=""):
-        """تولید پاسخ"""
+    def generate_response(self, user_input, context="", on_token=None):
+        """تولید پاسخ.
+
+        اگر ``on_token`` داده شود، پاسخ به‌صورت جریانی (توکن‌به‌توکن) تولید
+        می‌شود؛ این برای گفتگوی صوتی زنده لازم است تا TTS بتواند اولین جمله
+        را قبل از پایان کل پاسخ بخواند.
+        """
         if self.model_loaded:
-            return self._generate_with_model(user_input, context)
-        return self._generate_fallback(user_input, context)
+            return self._generate_with_model(user_input, context, on_token=on_token)
+        return self._generate_fallback(user_input, context, on_token=on_token)
+
+    def get_response_stream(self, user_input, context="", on_token=None):
+        """نام مستعار صریح برای تولید جریانی (استفاده در گفتگوی صوتی)."""
+        return self.generate_response(user_input, context, on_token=on_token)
 
     def _build_prompt_with_budget(self, user_input, context):
         """ساخت پرامپت با در نظر گرفتن ظرفیت واقعی context مدل.
@@ -192,7 +201,7 @@ class VinaBrain:
 
         return full_prompt
 
-    def _generate_with_model(self, user_input, context=""):
+    def _generate_with_model(self, user_input, context="", on_token=None):
         """تولید پاسخ با مدل محلی"""
         try:
             full_prompt = self._build_prompt_with_budget(user_input, context)
@@ -206,6 +215,7 @@ class VinaBrain:
                 repeat_penalty=self.repeat_penalty,
                 stop="کاربر:",
                 out_buf_size=MAX_OUTPUT_BUFFER,
+                on_token=on_token,
             )
             response = response.strip()
             return response if response else "متأسفم، نتوانستم پاسخ مناسبی تولید کنم."
@@ -215,8 +225,17 @@ class VinaBrain:
             return f"خطا در تولید پاسخ: {str(exc)[:150]}"
 
 
-    def _generate_fallback(self, user_input, context=""):
+    def _generate_fallback(self, user_input, context="", on_token=None):
         """پاسخ جایگزین وقتی مدل بارگذاری نشده (مثلاً هنوز مدلی دانلود نشده)"""
+        # پاسخ آماده را هم از مسیر جریانی عبور می‌دهیم تا رفتار گفتگوی صوتی
+        # (نمایش زنده + گفتن) در هر دو حالت یکسان باشد.
+        if on_token is not None:
+            text = self._fallback_text(user_input, context)
+            on_token(text)
+            return text
+        return self._fallback_text(user_input, context)
+
+    def _fallback_text(self, user_input, context=""):
         user_input_lower = user_input.lower().strip()
 
         greetings = ['سلام', 'درود', 'سلام وینا', 'هلو', 'احوال']

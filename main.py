@@ -61,6 +61,12 @@ class VinaApp(App):
     is_listening = BooleanProperty(False)
     is_speaking = BooleanProperty(False)
     voice_enabled = BooleanProperty(True)
+    # تنظیمات گفتگوی صوتی (Phase A)
+    prefer_offline_stt = BooleanProperty(True)   # پیش‌فرض: حریم خصوصی
+    barge_in_enabled = BooleanProperty(True)
+    wake_word_enabled = BooleanProperty(False)
+    voice_state = StringProperty('idle')
+    live_transcript = StringProperty('')
     model_status = StringProperty(fix_rtl("در حال بارگذاری..."))
     current_hour = NumericProperty(datetime.now().hour)
 
@@ -68,7 +74,7 @@ class VinaApp(App):
         self.title = self.app_title
         self.memory = VinaMemory()
         self.brain = VinaBrain(self.memory)
-        self.voice = VinaVoice()
+        self.voice = VinaVoice(prefer_offline_stt=self.prefer_offline_stt)
         self.search = VinaSearch()
         self.system_ctrl = VinaSystemControl()
         self.storage = StorageManager(self.memory)
@@ -323,8 +329,19 @@ class VinaApp(App):
             error_text = f'خطا در پردازش: {str(exc)[:100]}'
             self._add_bot_message(error_text)
 
-    def _get_response(self, text):
+    def _get_response(self, text, on_token=None):
+        """پاسخ وینا؛ اگر ``on_token`` داده شود، تولید جریانی انجام می‌شود.
+
+        مسیر دستورات سیستمی/جستجو/یادآوری پاسخ آماده برمی‌گرداند (جریانی
+        نیست)، اما برای یکنواختی همان را هم از طریق callback می‌فرستیم.
+        """
         text_lower = text.strip()
+
+        def _direct(answer):
+            """پاسخ‌های آماده (غیر LLM) را هم از مسیر جریانی عبور می‌دهد."""
+            if on_token is not None and answer:
+                on_token(answer)
+            return answer
 
         system_result = self.system_ctrl.handle_command(text_lower)
         if system_result:
@@ -345,7 +362,7 @@ class VinaApp(App):
             return note_result
 
         context = self.memory.get_context()
-        return self.brain.generate_response(text, context)
+        return self.brain.generate_response(text, context, on_token=on_token)
 
     def _extract_search_query(self, text):
         prefixes = ['جستجو کن', 'سرچ کن', 'از اینترنت بگرد', 'در اینترنت پیدا کن',
@@ -387,6 +404,15 @@ class VinaApp(App):
         finally:
             Clock.schedule_once(lambda dt: setattr(self, 'is_speaking', False), 0)
 
+    def _add_user_message(self, text):
+        msg = {
+            'role': 'user',
+            'text': text,
+            'time': datetime.now().strftime('%H:%M'),
+        }
+        self.chat_history.append(msg)
+        self._notify_new_message(msg)
+
     def _add_bot_message(self, text):
         msg = {
             'role': 'vina',
@@ -426,6 +452,133 @@ class VinaApp(App):
 
     def toggle_voice(self):
         self.voice_enabled = not self.voice_enabled
+
+    # ------------------------------------------------------------------
+    # گفتگوی صوتی زنده (Phase A)
+    # ------------------------------------------------------------------
+    def set_offline_stt(self, enabled):
+        """تغییر موتور تشخیص گفتار بین آفلاین (Vosk) و آنلاین (گوگل)."""
+        self.prefer_offline_stt = bool(enabled)
+        self.voice.prefer_offline_stt = bool(enabled)
+        # جلسه‌ی گفتگوی فعلی باید بازسازی شود تا موتور جدید اعمال گردد
+        was_running = bool(self.voice.conversation and self.voice.conversation.is_running)
+        self.voice.stop_conversation()
+        self._voice_conversation = None
+        if was_running:
+            self.start_voice_conversation()
+        info = self.voice.stt_engine_info()
+        self._toast(info.get('label', ''))
+
+    def download_stt_model(self, lang='fa'):
+        """دانلود مدل آفلاین تشخیص گفتار در پس‌زمینه."""
+        from src.model_downloader import VoskModelDownloader
+
+        downloader = VoskModelDownloader()
+        downloader.status_callback = lambda msg: Clock.schedule_once(
+            lambda dt: self._toast(msg), 0)
+        downloader.progress_callback = lambda key, pct: Clock.schedule_once(
+            lambda dt: setattr(self, 'model_status',
+                               fix_rtl(f'دانلود مدل صوتی: {pct:.0f}%')), 0)
+        threading.Thread(target=downloader.download, args=(lang,),
+                         daemon=True, name='VoskDownload').start()
+
+    def _toast(self, message):
+        """نمایش پیام کوتاه به کاربر (اگر Toast در دسترس نبود، در لاگ)."""
+        try:
+            from src.design_system import Toast
+            Toast(text=fix_rtl(str(message))).show(self.root_float_layout)
+        except Exception:
+            print(f'[وینا] {message}')
+
+    def _llm_stream_for_voice(self, user_text, on_token):
+        """پل بین گفتگوی صوتی و مغز وینا (با تولید جریانی).
+
+        از همان ``_get_response`` استفاده می‌کند تا گفتگوی صوتی دقیقاً همان
+        قابلیت‌های چت متنی (دستورات سیستمی، جستجو، یادآوری، حافظه) را داشته
+        باشد - نه یک مسیر جداگانه و ناقص.
+        """
+        self.memory.save_conversation('user', user_text)
+        Clock.schedule_once(lambda dt: self._add_user_message(user_text), 0)
+
+        collected = []
+
+        def _token(piece):
+            collected.append(piece)
+            Clock.schedule_once(
+                lambda dt: setattr(self, 'live_transcript', ''.join(collected)), 0)
+            # اگر گفتگو قطع شده باشد، on_token مقدار False می‌دهد و تولید
+            # باید فوراً متوقف شود (قطع کردن وسط صحبت).
+            return on_token(piece)
+
+        response = self._get_response(user_text, on_token=_token)
+        response = (response or ''.join(collected)).strip()
+
+        self.memory.save_conversation('vina', response)
+        try:
+            self.memory.analyze_and_store_preferences(user_text)
+        except Exception:
+            pass
+        Clock.schedule_once(lambda dt: self._add_bot_message(response), 0)
+        return response
+
+    def ensure_microphone_permission(self, callback):
+        """مجوز میکروفون را در زمان اجرا می‌گیرد (اندروید ۶ به بالا).
+
+        مجوز دقیقاً *در لحظه‌ی نیاز* درخواست می‌شود، نه همه با هم هنگام
+        اجرا شدن برنامه؛ این هم توصیه‌ی رسمی اندروید است و هم نرخ پذیرش
+        کاربر را بالا می‌برد.
+        """
+        from src.android_bridge import is_android
+
+        if not is_android():
+            callback(True)
+            return
+
+        perm = 'android.permission.RECORD_AUDIO'
+        if self.voice.bridge.has_permission(perm):
+            callback(True)
+            return
+
+        def _on_result(permissions, grants):
+            granted = bool(grants) and all(grants)
+            Clock.schedule_once(lambda dt: callback(granted), 0)
+
+        self.voice.bridge.request_permissions([perm], _on_result)
+
+    def start_voice_conversation(self):
+        """شروع گفتگوی صوتی زنده و دوطرفه."""
+        conv = self.voice.conversation
+        if conv is None:
+            conv = self.voice.create_conversation(
+                llm_generate=self._llm_stream_for_voice,
+                wake_word_enabled=self.wake_word_enabled,
+                barge_in_enabled=self.barge_in_enabled,
+            )
+            conv.on_state_change = lambda st: Clock.schedule_once(
+                lambda dt: self._on_voice_state(st), 0)
+            conv.on_partial_transcript = lambda t: Clock.schedule_once(
+                lambda dt: setattr(self, 'live_transcript', t), 0)
+            conv.on_error = lambda msg: Clock.schedule_once(
+                lambda dt: self._toast(msg), 0)
+
+        if self.voice.stt_note:
+            self._toast(self.voice.stt_note)
+
+        if not conv.start():
+            self._toast('میکروفون در دسترس نیست - مجوز ضبط صدا را بررسی کنید')
+            return False
+        return True
+
+    def stop_voice_conversation(self):
+        self.voice.stop_conversation()
+        self.voice_state = 'idle'
+        self.is_listening = False
+        self.is_speaking = False
+
+    def _on_voice_state(self, state):
+        self.voice_state = state
+        self.is_listening = (state == 'listening')
+        self.is_speaking = (state == 'speaking')
 
     def get_personality_context(self):
         return self.memory.get_personality()

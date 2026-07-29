@@ -25,6 +25,8 @@ class LlmEngine:
     def __init__(self):
         self._lib = None
         self._handle = None
+        self._has_stream = False
+        self._TokenCallback = None
         self._lock = threading.Lock()
         self._cancel_flag = ctypes.c_int(0)
         self.model_path = None
@@ -106,6 +108,23 @@ class LlmEngine:
             ctypes.c_float, ctypes.c_int, ctypes.c_float, ctypes.c_char_p,
             ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int),
         ]
+        # امضای callback جریانی: int (*)(const char* piece, void* user_data)
+        self._TokenCallback = ctypes.CFUNCTYPE(
+            ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p
+        )
+        try:
+            lib.vina_llm_generate_stream.restype = ctypes.c_int
+            lib.vina_llm_generate_stream.argtypes = [
+                ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_float,
+                ctypes.c_float, ctypes.c_int, ctypes.c_float, ctypes.c_char_p,
+                ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int),
+                self._TokenCallback, ctypes.c_void_p,
+            ]
+            self._has_stream = True
+        except AttributeError:
+            # کتابخانه‌ی قدیمی بدون پشتیبانی جریانی - به حالت blocking برمی‌گردیم
+            self._has_stream = False
+
         lib.vina_llm_last_error.restype = ctypes.c_char_p
         lib.vina_llm_last_error.argtypes = [ctypes.c_void_p]
         lib.vina_llm_set_verbose.argtypes = [ctypes.c_int]
@@ -161,8 +180,15 @@ class LlmEngine:
         self._cancel_flag.value = 1
 
     def generate(self, prompt, max_tokens=256, temperature=0.7, top_p=0.9,
-                 top_k=40, repeat_penalty=1.1, stop=None, out_buf_size=8192):
-        """تولید پاسخ برای prompt. Blocking - باید در ترد جداگانه فراخوانی شود."""
+                 top_k=40, repeat_penalty=1.1, stop=None, out_buf_size=8192,
+                 on_token=None):
+        """تولید پاسخ برای prompt. Blocking - باید در ترد جداگانه فراخوانی شود.
+
+        اگر ``on_token`` داده شود، هر قطعه‌ی متن به‌محض تولید به آن پاس داده
+        می‌شود (نمایش زنده در چت + شروع زودهنگام TTS). اگر آن تابع مقدار
+        ``False`` برگرداند، تولید فوراً متوقف می‌شود - این همان مکانیزمی است
+        که «قطع کردن وسط صحبت» (barge-in) با آن کار می‌کند.
+        """
         if not self.loaded or not self._handle:
             raise LlmLoadError(self.load_error or "مدل بارگذاری نشده است")
 
@@ -172,19 +198,49 @@ class LlmEngine:
             stop_bytes = stop.encode('utf-8') if stop else None
 
             start_time = time.monotonic()
-            n = self._lib.vina_llm_generate(
-                self._handle,
-                prompt.encode('utf-8'),
-                max_tokens,
-                ctypes.c_float(temperature),
-                ctypes.c_float(top_p),
-                top_k,
-                ctypes.c_float(repeat_penalty),
-                stop_bytes,
-                out_buf,
-                out_buf_size,
-                ctypes.byref(self._cancel_flag),
-            )
+
+            if on_token is not None and self._has_stream:
+                # پوشش امن: هر استثنا در کد پایتونی callback نباید از مرز
+                # ctypes عبور کند (باعث کرش native می‌شود)، پس آن را اینجا
+                # می‌گیریم و صرفاً تولید را متوقف می‌کنیم.
+                def _trampoline(piece_ptr, _user_data):
+                    try:
+                        piece = piece_ptr.decode('utf-8', errors='replace') if piece_ptr else ''
+                        if piece and on_token(piece) is False:
+                            return 1  # درخواست توقف
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"خطا در callback جریانی: {exc}")
+                        return 1
+                    return 0
+
+                # نگه‌داشتن ارجاع تا پایان فراخوانی (جلوگیری از GC شدن callback)
+                cb = self._TokenCallback(_trampoline)
+                n = self._lib.vina_llm_generate_stream(
+                    self._handle, prompt.encode('utf-8'), max_tokens,
+                    ctypes.c_float(temperature), ctypes.c_float(top_p), top_k,
+                    ctypes.c_float(repeat_penalty), stop_bytes, out_buf,
+                    out_buf_size, ctypes.byref(self._cancel_flag), cb, None,
+                )
+            else:
+                n = self._lib.vina_llm_generate(
+                    self._handle,
+                    prompt.encode('utf-8'),
+                    max_tokens,
+                    ctypes.c_float(temperature),
+                    ctypes.c_float(top_p),
+                    top_k,
+                    ctypes.c_float(repeat_penalty),
+                    stop_bytes,
+                    out_buf,
+                    out_buf_size,
+                    ctypes.byref(self._cancel_flag),
+                )
+                # اگر کتابخانه‌ی native قدیمی است، حداقل کل متن را یک‌جا بده
+                if on_token is not None and n >= 0:
+                    try:
+                        on_token(out_buf.value.decode('utf-8', errors='replace'))
+                    except Exception:
+                        pass
             elapsed = max(1e-6, time.monotonic() - start_time)
 
             if n < 0:
