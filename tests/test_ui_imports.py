@@ -31,11 +31,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-try:
-    import kivy  # noqa: F401
-    HAS_KIVY = True
-except Exception:
-    HAS_KIVY = False
+import importlib.util
+
+# بدون import واقعی بررسی می‌شود تا هشدار «imported but unused» ندهد
+HAS_KIVY = importlib.util.find_spec('kivy') is not None
 
 
 UI_MODULES = [
