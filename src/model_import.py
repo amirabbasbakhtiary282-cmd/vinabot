@@ -46,10 +46,11 @@ def is_supported():
         from kivy.utils import platform
         if platform != 'android':
             return False
-        # فقط بررسی می‌کنیم که pyjnius واقعاً قابل import باشد؛ خود شیء
-        # اینجا استفاده نمی‌شود.
-        import jnius  # noqa: F401
-        return True
+        # فقط بررسی می‌کنیم که pyjnius واقعاً در دسترس باشد. از
+        # importlib استفاده می‌شود تا یک import بلااستفاده نداشته باشیم
+        # (که هم هشدار lint می‌دهد و هم نیت کد را مبهم می‌کند).
+        import importlib.util
+        return importlib.util.find_spec('jnius') is not None
     except Exception:
         return False
 

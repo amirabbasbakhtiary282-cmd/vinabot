@@ -107,18 +107,49 @@ class VinaApp(App):
         return self.root_float_layout
 
     def _request_runtime_permissions(self):
-        """درخواست مجوزهای اجرایی لازم (اندروید ۶ به بعد این مجوزها را در
-        زمان نصب نمی‌دهد و باید صریحاً در زمان اجرا درخواست شوند)."""
+        """درخواست مجوزهای اجرایی لازم.
+
+        نکاتی که در نسخه‌ی قبلی رعایت نشده بود:
+
+        ۱) ``INTERNET`` یک مجوز «normal» است، نه «dangerous». اندروید آن
+           را در زمان نصب می‌دهد و درخواست runtime برایش بی‌اثر است.
+           نگه داشتنش در این لیست فقط گمراه‌کننده بود.
+
+        ۲) ``POST_NOTIFICATIONS`` از اندروید ۱۳ (API 33) یک مجوز
+           dangerous است و بدون درخواست runtime، هیچ اعلانی (از جمله
+           یادآوری‌ها که در ``_check_reminders`` استفاده می‌شوند) نمایش
+           داده نمی‌شود - بی‌سروصدا و بدون هیچ خطایی.
+           روی نسخه‌های قدیمی‌تر این ثابت وجود ندارد، پس با getattr
+           به‌صورت ایمن گرفته می‌شود.
+
+        ۳) نتیجه‌ی درخواست باید لاگ شود؛ اگر کاربر میکروفون را رد کند،
+           باید بدانیم چرا قابلیت صوتی کار نمی‌کند.
+        """
         try:
             from src.android_bridge import AndroidBridge, is_android
             if not is_android():
                 return
+
             bridge = AndroidBridge()
             from android.permissions import Permission
-            bridge.request_permissions([
-                Permission.RECORD_AUDIO,
-                Permission.INTERNET,
-            ])
+
+            wanted = [Permission.RECORD_AUDIO]
+
+            # فقط روی اندروید ۱۳+ وجود دارد
+            post_notifications = getattr(Permission, 'POST_NOTIFICATIONS', None)
+            if post_notifications:
+                wanted.append(post_notifications)
+
+            def _on_result(permissions, grants):
+                for name, granted in zip(permissions, grants):
+                    state = 'داده شد' if granted else 'رد شد'
+                    print(f'وینا: مجوز {name}: {state}')
+                    if not granted and 'RECORD_AUDIO' in str(name):
+                        Clock.schedule_once(
+                            lambda dt: setattr(
+                                self, 'voice_state', 'no_permission'), 0)
+
+            bridge.request_permissions(wanted, _on_result)
         except Exception as exc:
             print(f"خطا در درخواست مجوزها: {exc}")
 
