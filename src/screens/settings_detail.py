@@ -23,6 +23,7 @@ class SettingsDetailScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.current_section_key = None
+        self.current_section_title = ''
         self._root = BoxLayout(orientation='vertical')
         self.add_widget(self._root)
 
@@ -54,6 +55,9 @@ class SettingsDetailScreen(Screen):
     def load_section(self, section_key, title):
         from src.screens import settings_sections as ss
         self.current_section_key = section_key
+        # عنوان را نگه می‌داریم تا بتوان همین بخش را بدون دانستن عنوان
+        # دوباره ساخت (مثلاً بعد از افزوده شدن یک مدل جدید).
+        self.current_section_title = title
         self.header.title_text = fix_rtl(title)
         self.body.clear_widgets()
 

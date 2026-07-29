@@ -14,7 +14,7 @@ llama-cpp-python در buildozer.spec اصلی پروژه به همین دلیل 
 خروجی این recipe: libggml-base.so, libggml-cpu.so, libggml.so, libllama.so
 """
 from multiprocessing import cpu_count
-from os.path import join
+from os.path import exists, join
 
 import sh
 
@@ -61,6 +61,11 @@ class LlamaCppRecipe(Recipe):
         "libllama.so": "build/bin",
     }
 
+    # کتابخانه‌های llama.cpp با c++_shared لینک می‌شوند؛ بدون این پرچم
+    # libc++_shared.so داخل APK قرار نمی‌گیرد و برنامه هنگام بارگذاری
+    # کتابخانه کرش می‌کند.
+    need_stl_shared = True
+
     def get_build_dir(self, arch):
         # codeload tarball برای تگ b5026 پوشه‌ی llama.cpp-b5026 می‌سازد
         return join(self.get_build_container_dir(arch), "llama.cpp-" + self.version)
@@ -105,8 +110,42 @@ class LlamaCppRecipe(Recipe):
             shprint(sh.cmake, "--build", "build", "--config", "Release",
                     "-j", str(cpu_count()), _env=env)
 
-    def get_recipe_env(self, arch=None):
-        env = super().get_recipe_env(arch)
+        # ------------------------------------------------------------------
+        # تأیید صریح خروجی
+        # ------------------------------------------------------------------
+        # اگر CMake با موفقیت تمام شود ولی به هر دلیلی نام یا مسیر خروجی
+        # فرق کند (مثلاً در نسخه‌ی جدیدتر llama.cpp)، کلاس پایه بعداً موقع
+        # install_libraries با یک خطای مبهم «file not found» شکست می‌خورد.
+        # این بررسی مشکل را همین‌جا با پیام روشن گزارش می‌کند.
+        missing = [
+            join(build_dir, rel, lib)
+            for lib, rel in self.built_libraries.items()
+            if not exists(join(build_dir, rel, lib))
+        ]
+        if missing:
+            raise RuntimeError(
+                "بیلد llama.cpp تمام شد ولی این کتابخانه‌ها ساخته نشدند:\n  "
+                + "\n  ".join(missing)
+            )
+        info(f"llama.cpp: all {len(self.built_libraries)} libraries built for {name}")
+
+    def get_recipe_env(self, arch=None, with_flags_in_cc=True):
+        """محیط بیلد مخصوص CMake.
+
+        نکته‌ی مهم: python-for-android متغیرهای CC/CXX را به شکل
+        «{ccache} {clang} {cflags}» می‌سازد (archs.py). دادن چنین رشته‌ای
+        به CMake خطرناک است، چون CMake انتظار دارد CC فقط *مسیر* یک
+        فایل اجرایی باشد و در مرحله‌ی compiler sanity check شکست می‌خورد.
+
+        از طرف دیگر، فایل toolchain رسمی اندروید (android.toolchain.cmake)
+        خودش CMAKE_C_COMPILER و CMAKE_CXX_COMPILER را درست تنظیم می‌کند،
+        پس اصلاً نیازی به CC/CXX نداریم. آن‌ها را حذف می‌کنیم تا تداخل
+        ایجاد نکنند. همین منطق برای CFLAGS/CXXFLAGS هم صادق است: پرچم‌های
+        -target و sysroot را toolchain مدیریت می‌کند.
+        """
+        env = super().get_recipe_env(arch, with_flags_in_cc=False)
+        for key in ("CC", "CXX", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS", "LDLIBS"):
+            env.pop(key, None)
         return env
 
 

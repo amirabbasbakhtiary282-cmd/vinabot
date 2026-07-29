@@ -12,11 +12,11 @@
 به‌صورت خودکار شناسایی و بارگذاری می‌شود.
 """
 
-import glob
 import os
 from datetime import datetime
 
 from src.llm_engine import LlmEngine, LlmLoadError
+from src import model_paths
 
 DEFAULT_N_CTX = 2048
 MAX_HISTORY_MESSAGES = 12
@@ -49,19 +49,16 @@ class VinaBrain:
         return self.custom_system_prompt if self.custom_system_prompt else self.system_prompt
 
     def _get_models_dir(self):
-        return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
+        """پوشه‌ی اصلی مدل‌ها (مرجع واحد: src/model_paths.py)."""
+        return model_paths.get_models_dir()
 
     def _find_model(self):
-        """جستجوی هر فایل GGUF موجود در پوشه‌ی models (مستقل از نام دقیق مدل)"""
-        candidates = []
-        for base_dir in (
-            self._get_models_dir(),
-            '/data/data/org.vinabot/files/models',
-            os.path.expanduser('~/.vina/models'),
-        ):
-            if os.path.isdir(base_dir):
-                candidates.extend(sorted(glob.glob(os.path.join(base_dir, '*.gguf'))))
-        return candidates[0] if candidates else None
+        """جستجوی هر فایل GGUF موجود (مستقل از نام دقیق مدل).
+
+        منطق جستجو عمداً در src/model_paths.py متمرکز شده تا موتور،
+        دانلودکننده و صفحه‌ی تنظیمات دقیقاً یک لیست مسیر یکسان را ببینند.
+        """
+        return model_paths.find_model()
 
     def _build_system_prompt(self):
         """ساخت پرامپت سیستمی وینا
@@ -114,11 +111,8 @@ class VinaBrain:
         self.model_loaded = False
 
     def list_available_models(self):
-        """لیست تمام مدل‌های GGUF موجود در پوشه‌ی models (برای انتخاب در تنظیمات)"""
-        models_dir = self._get_models_dir()
-        if not os.path.isdir(models_dir):
-            return []
-        return sorted(glob.glob(os.path.join(models_dir, '*.gguf')))
+        """لیست تمام مدل‌های GGUF موجود (برای انتخاب در تنظیمات)"""
+        return model_paths.find_models()
 
     def get_model_info(self):
         """اطلاعات مدل فعلی برای نمایش در صفحه‌ی تنظیمات مدل هوش مصنوعی"""
@@ -256,13 +250,25 @@ class VinaBrain:
             now = datetime.now()
             return f"الان ساعت {now.strftime('%H:%M')} و تاریخ {now.strftime('%Y/%m/%d')} هست."
 
+        # پیام راهنما با *مسیر واقعی* روی همین دستگاه، نه یک مسیر عمومی.
+        # (قبلاً «پوشه‌ی models» گفته می‌شد که کاربر روی گوشی اصلاً پیدایش
+        # نمی‌کرد، و «برنامه را مجدداً راه‌اندازی کنید» هم دیگر لازم نیست
+        # چون دکمه‌ی «جستجوی مجدد مدل» در تنظیمات اضافه شده.)
+        try:
+            models_dir = model_paths.get_models_dir()
+        except Exception:
+            models_dir = 'models'
+
         return (
-            "من وینا هستم. در حال حاضر هیچ مدل هوش مصنوعی‌ای بارگذاری نشده.\n\n"
-            "برای فعال‌سازی پاسخ‌های هوشمند:\n"
-            "1. یک فایل مدل زبانی سبک با فرمت GGUF دانلود کنید "
-            "(مثلاً Qwen2.5-0.5B-Instruct یا هر مدل کوچک مشابه)\n"
-            "2. آن را در پوشه‌ی models برنامه قرار دهید\n"
-            "3. برنامه را مجدداً راه‌اندازی کنید\n\n"
+            "من وینا هستم. هنوز هیچ مدل زبانی روی دستگاه پیدا نکردم، "
+            "برای همین فعلاً فقط می‌توانم به چند سؤال ساده پاسخ بدهم.\n\n"
+            "برای فعال‌سازی پاسخ‌های هوشمند دو راه دارید:\n\n"
+            "الف) از «تنظیمات ← مدل هوش مصنوعی ← انتخاب فایل مدل» فایل "
+            "GGUF را از حافظه‌ی گوشی انتخاب کنید (ساده‌ترین راه).\n\n"
+            "ب) فایل مدل را با کابل USB در این پوشه کپی کنید:\n"
+            f"{models_dir}\n"
+            f"سپس در همان صفحه‌ی تنظیمات «جستجوی مجدد مدل» را بزنید.\n\n"
+            f"مدل پیشنهادی: {model_paths.DEFAULT_MODEL_NAME}\n\n"
             f"پیام شما: {user_input}"
         )
 

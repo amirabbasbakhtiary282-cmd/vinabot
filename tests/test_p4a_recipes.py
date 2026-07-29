@@ -56,7 +56,9 @@ def _recipe_class_fields(name):
             for target in stmt.targets:
                 if not isinstance(target, ast.Name):
                     continue
-                if target.id not in ('version', 'url'):
+                # قبلاً فقط version/url خوانده می‌شد؛ حالا هر صفت ساده‌ی
+                # کلاس (مثل aar_url در recipe وسک) هم قابل بررسی است.
+                if target.id.startswith('_'):
                     continue
                 try:
                     fields[target.id] = ast.literal_eval(stmt.value)
@@ -156,13 +158,42 @@ class TestLlamaCppRecipe(unittest.TestCase):
 
 
 class TestVoskRecipe(unittest.TestCase):
+    """recipe وسک اکنون از artifact رسمی Maven (aar) استفاده می‌کند.
 
-    def test_url_is_zip(self):
+    تست قبلی (test_url_is_zip) انتظار داشت ``url`` به ‎.zip ختم شود، یعنی
+    فایل vosk-android-<v>.zip از GitHub Releases. آن منبع کنار گذاشته شد
+    چون ساختار داخلی‌اش بین نسخه‌ها تغییر می‌کند و قابل اتکا نیست؛ به‌جایش
+    از همان artifact ای استفاده می‌شود که recipe رسمی p4a هم استفاده
+    می‌کند و ساختارش استاندارد است: ``jni/<abi>/libvosk.so``.
+    """
+
+    def test_uses_official_maven_aar(self):
         fields = _recipe_class_fields('vosk')
-        versioned = fields['url'].format(version=fields['version'])
-        self.assertTrue(versioned.endswith('.zip'))
+        versioned = fields['aar_url'].format(version=fields['version'])
+        self.assertTrue(versioned.endswith('.aar'), versioned)
         self.assertEqual(posixpath.basename(versioned),
-                         'vosk-android-0.3.45.zip')
+                         'vosk-android-0.3.45.aar')
+        self.assertIn('repo.maven.apache.org', versioned)
+
+    def test_url_disabled_so_p4a_does_not_autounpack(self):
+        """``url`` باید None باشد تا دانلود دست خودمان بماند.
+
+        اگر url مقدار بگیرد، p4a خودش دانلود/استخراج می‌کند و در صورت
+        شکست کل بیلد APK متوقف می‌شود - در حالی که STT آفلاین یک قابلیت
+        اختیاری است و نباید APK را از بین ببرد.
+        """
+        fields = _recipe_class_fields('vosk')
+        self.assertIsNone(fields['url'])
+
+    def test_failure_is_not_fatal(self):
+        """build_arch نباید استثنای دانلود را به بیرون بدهد."""
+        path = os.path.join(RECIPES_DIR, 'vosk', '__init__.py')
+        with open(path, encoding='utf-8') as f:
+            src = f.read()
+        self.assertIn('except Exception:', src)
+        self.assertIn('traceback.format_exc()', src,
+                      'در صورت شکست باید جزئیات کامل خطا چاپ شود، '
+                      'نه اینکه بی‌صدا رد شود')
 
 
 if __name__ == '__main__':

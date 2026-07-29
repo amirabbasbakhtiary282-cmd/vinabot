@@ -63,9 +63,18 @@ def _install_fake_p4a():
 
     if 'pythonforandroid.logger' not in sys.modules:
         logger = _mod('pythonforandroid.logger')
+        # این‌ها دقیقاً همان نام‌هایی هستند که pythonforandroid/logger.py
+        # صادر می‌کند (خطوط ۴۵-۴۸: info/debug/warning/error از logging، و
+        # info_main/shprint به‌صورت تابع). اگر یکی‌شان اینجا نباشد، recipe
+        # هنگام import با ImportError شکست می‌خورد در حالی که در بیلد
+        # واقعی سالم است - یعنی تست الکی قرمز می‌شود.
         logger.info = lambda *a, **k: None
+        logger.debug = lambda *a, **k: None
+        logger.warning = lambda *a, **k: None
+        logger.error = lambda *a, **k: None
         logger.shprint = lambda *a, **k: None
         logger.info_main = lambda *a, **k: None
+        logger.info_notify = lambda *a, **k: None
 
     if 'pythonforandroid.recipe' not in sys.modules:
         recipe_mod = _mod('pythonforandroid.recipe')
@@ -222,23 +231,41 @@ class TestVoskDoesNotBreakUnpack(unittest.TestCase):
     پس recipe نباید در prepare_build_dir آن پوشه را از قبل بسازد.
     """
 
-    def test_vosk_does_not_override_prepare_build_dir(self):
-        mod = _load_recipe('vosk')
-        self.assertNotIn('prepare_build_dir', vars(mod.VoskRecipe),
-                         'VoskRecipe نباید prepare_build_dir را override کند - '
-                         'این باعث می‌شود آرشیو هرگز استخراج نشود')
-
     def test_no_recipe_ensure_dirs_its_own_build_dir_before_unpack(self):
-        """هیچ recipe ای که url دارد نباید پوشه‌ی build را زودتر بسازد."""
-        for name in ('llamacpp', 'vosk'):
+        """قاعده‌ی دقیق: فقط recipeهایی که به unpack خودکار p4a تکیه می‌کنند.
+
+        نکته‌ی مهم درباره‌ی دامنه‌ی این قانون: خطر «استخراج بی‌صدا نادیده
+        گرفته می‌شود» فقط وقتی وجود دارد که recipe مقدار ``url`` داشته
+        باشد، چون تنها در آن حالت متد unpack واقعاً کاری می‌کند:
+
+            recipe.py:479  if self.url is None: return   # هیچ استخراجی
+            recipe.py:491  if not exists(directory_name) or not isdir(...)
+
+        اگر ``url = None`` باشد (مثل recipe فعلی vosk که خودش فایل aar را
+        کنترل‌شده دانلود می‌کند، و recipe vinallm که سورس را از کنار خودش
+        برمی‌دارد)، ساختن پوشه‌ی build نه‌تنها بی‌خطر است بلکه *لازم* است.
+
+        پس به‌جای بررسی یک لیست ثابت از نام‌ها، خود قاعده را بررسی می‌کنیم.
+        """
+        for name in ('llamacpp', 'vinallm', 'vosk'):
+            mod = _load_recipe(name)
+            recipe_cls = None
+            for value in vars(mod).values():
+                if isinstance(value, type) and value.__name__.endswith('Recipe'):
+                    recipe_cls = value
+            self.assertIsNotNone(recipe_cls, f'کلاس recipe در «{name}» پیدا نشد')
+
+            if recipe_cls.url is None:
+                continue  # این recipe اصلاً از unpack خودکار استفاده نمی‌کند
+
             path = os.path.join(RECIPES, name, '__init__.py')
             with open(path, encoding='utf-8') as f:
                 src = f.read()
             if 'def prepare_build_dir' in src:
                 self.assertNotIn(
                     'ensure_dir(self.get_build_dir', src,
-                    f'recipe «{name}»: ساختن پوشه‌ی build قبل از unpack '
-                    f'باعث می‌شود استخراج نادیده گرفته شود')
+                    f'recipe «{name}» مقدار url دارد، پس ساختن پوشه‌ی build '
+                    f'قبل از unpack باعث می‌شود استخراج نادیده گرفته شود')
 
 
 class TestNoRawArchAttributeAccess(unittest.TestCase):

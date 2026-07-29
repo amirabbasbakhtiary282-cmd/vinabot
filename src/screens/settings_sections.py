@@ -16,7 +16,7 @@ from kivy.uix.label import Label
 
 from src.design_system import (
     theme, THEMES, THEME_LABELS, SettingsCard, GlassCard, ModernSwitch,
-    ModernSlider, Dropdown, SecondaryButton, DangerButton,
+    ModernSlider, Dropdown, PrimaryButton, SecondaryButton, DangerButton,
     ConfirmationDialog, Toast,
 )
 from src.text_utils import fix_rtl
@@ -256,6 +256,54 @@ def build_ai_model(container):
     actions_row.add_widget(unload_btn)
     container.add_widget(actions_row)
 
+    # ----------------------------------------------------------------------
+    # وارد کردن مدل - بخش کلیدی برای تجربه‌ی کاربر
+    # ----------------------------------------------------------------------
+    # بدون این بخش، کاربر روی گوشی روت‌نشده عملاً هیچ راهی برای رساندن
+    # فایل مدل به برنامه ندارد (حافظه‌ی خصوصی برنامه با فایل‌منیجر قابل
+    # دسترسی نیست).
+    container.add_widget(_section_label('افزودن مدل'))
+
+    import_row = BoxLayout(orientation='horizontal', size_hint_y=None,
+                           height=dp(48), spacing=dp(8))
+
+    pick_btn = PrimaryButton(text=fix_rtl('انتخاب فایل مدل'))
+    pick_btn.bind(on_release=lambda *a: _pick_model_file(brain))
+    import_row.add_widget(pick_btn)
+
+    rescan_btn = SecondaryButton(text=fix_rtl('جستجوی مجدد مدل'))
+    rescan_btn.bind(on_release=lambda *a: _rescan_models(brain))
+    import_row.add_widget(rescan_btn)
+    container.add_widget(import_row)
+
+    # نمایش مسیری که کاربر باید فایل را در آن بگذارد
+    from src import model_paths
+    try:
+        models_dir = model_paths.ensure_models_dir()
+    except Exception:
+        models_dir = '—'
+
+    path_card = GlassCard(orientation='vertical', size_hint_y=None, height=dp(96),
+                          padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(4),
+                          radius=theme.radius_lg)
+    hint = Label(
+        text=fix_rtl('فایل .gguf را می‌توانید مستقیماً در این پوشه کپی کنید:'),
+        font_name=theme.font_name, font_size='11sp', color=theme.text_secondary,
+        halign='right', size_hint_y=None, height=dp(20),
+    )
+    hint.bind(size=lambda inst, *a: setattr(inst, 'text_size', inst.size))
+    path_card.add_widget(hint)
+
+    # مسیر لاتین است، پس نباید از fix_rtl عبور کند (وگرنه برعکس می‌شود)
+    path_label = Label(
+        text=models_dir, font_name=theme.font_name, font_size='10sp',
+        color=theme.text_primary, halign='left', valign='top',
+        size_hint_y=None, height=dp(52),
+    )
+    path_label.bind(size=lambda inst, *a: setattr(inst, 'text_size', inst.size))
+    path_card.add_widget(path_label)
+    container.add_widget(path_card)
+
     container.add_widget(_section_label('پارامترهای تولید پاسخ'))
     container.add_widget(_slider_card('دما (Temperature)', brain.temperature, 0.0, 1.5,
                                        lambda v: setattr(brain, 'temperature', v)))
@@ -286,6 +334,127 @@ def _load_selected_model(brain, models, name):
             brain.load_model(path)
             _show_toast(f'مدل «{name}» بارگذاری شد')
             return
+
+
+def _refresh_model_section():
+    """صفحه‌ی تنظیمات مدل را دوباره می‌سازد تا تغییرات دیده شود."""
+    from kivy.clock import Clock
+
+    def _do(_dt):
+        try:
+            app = App.get_running_app()
+            screen = app.sm.get_screen('settings_detail')
+            if getattr(screen, 'current_section_key', None) == 'ai_model':
+                screen.load_section(
+                    'ai_model',
+                    getattr(screen, 'current_section_title', 'مدل هوش مصنوعی'))
+        except Exception:
+            # تازه‌سازی رابط کاربری هرگز نباید باعث کرش شود
+            pass
+
+    Clock.schedule_once(_do, 0)
+
+
+def _rescan_models(brain):
+    """جستجوی مجدد پوشه‌های مدل بدون نیاز به راه‌اندازی مجدد برنامه.
+
+    این دکمه پاسخ مستقیم به این سناریوست: کاربر فایل GGUF را با کابل USB
+    در پوشه‌ی مدل‌ها کپی می‌کند در حالی که برنامه باز است. بدون این دکمه
+    مجبور بود برنامه را ببندد و باز کند.
+    """
+    import os
+    import threading
+
+    from kivy.clock import Clock
+    from src import model_paths
+
+    def _work():
+        try:
+            model_paths.ensure_models_dir()
+            found = model_paths.find_models()
+
+            if not found:
+                locations = model_paths.describe_search_locations()
+                Clock.schedule_once(
+                    lambda dt: _show_toast('هیچ فایل .gguf پیدا نشد'), 0)
+                print('وینا: مسیرهای بررسی‌شده برای مدل:\n' + locations)
+                return
+
+            if brain.model_loaded and brain.model_path in found:
+                name = os.path.basename(brain.model_path)
+                Clock.schedule_once(
+                    lambda dt: _show_toast(f'مدل «{name}» از قبل فعال است'), 0)
+                return
+
+            loaded = brain.load_model(found[0])
+            name = os.path.basename(found[0])
+            if loaded:
+                Clock.schedule_once(
+                    lambda dt: _show_toast(f'مدل «{name}» بارگذاری شد'), 0)
+                Clock.schedule_once(lambda dt: _sync_app_status(), 0)
+                _refresh_model_section()
+            else:
+                err = (brain.engine.load_error or 'دلیل نامشخص')[:60]
+                Clock.schedule_once(
+                    lambda dt: _show_toast(f'بارگذاری ناموفق: {err}'), 0)
+        except Exception as exc:
+            message = str(exc)[:60]
+            Clock.schedule_once(
+                lambda dt: _show_toast(f'خطا در جستجوی مدل: {message}'), 0)
+
+    _show_toast('در حال جستجوی مدل...')
+    threading.Thread(target=_work, daemon=True).start()
+
+
+def _sync_app_status():
+    """وضعیت مدل در صفحه‌ی اصلی را با وضعیت واقعی موتور هماهنگ می‌کند."""
+    try:
+        app = App.get_running_app()
+        app.model_status = fix_rtl(
+            'آماده' if app.brain.model_loaded else 'بدون مدل')
+    except Exception:
+        pass
+
+
+def _pick_model_file(brain):
+    """انتخاب فایل مدل با انتخاب‌گر سیستمی و کپی آن به پوشه‌ی مدل‌ها."""
+    import os
+
+    from kivy.clock import Clock
+    from src import model_import
+
+    if not model_import.is_supported():
+        _show_toast('انتخاب فایل فقط روی اندروید در دسترس است')
+        return
+
+    state = {'last_percent': -1}
+
+    def _on_progress(copied, total):
+        if not total:
+            return
+        percent = int(copied * 100 / total)
+        # فقط هر ۵ درصد پیام بده تا رابط کاربری غرق در Toast نشود
+        if percent >= state['last_percent'] + 5:
+            state['last_percent'] = percent
+            Clock.schedule_once(
+                lambda dt, p=percent: _show_toast(f'در حال کپی مدل... {p}٪'), 0)
+
+    def _on_done(path):
+        name = os.path.basename(path)
+
+        def _finish(_dt):
+            _show_toast(f'مدل «{name}» اضافه شد؛ در حال بارگذاری...')
+            _rescan_models(brain)
+
+        Clock.schedule_once(_finish, 0)
+
+    def _on_error(message):
+        Clock.schedule_once(
+            lambda dt: _show_toast(f'خطا: {str(message)[:70]}'), 0)
+
+    _show_toast('انتخاب‌گر فایل باز می‌شود...')
+    model_import.pick_and_import(
+        on_progress=_on_progress, on_done=_on_done, on_error=_on_error)
 
 
 # ==========================================================================

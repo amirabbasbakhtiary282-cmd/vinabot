@@ -6,8 +6,18 @@ on:
   pull_request:
   workflow_dispatch:
 
+# جلوگیری از اجرای هم‌زمان چند بیلد روی یک شاخه (هر بیلد تا ۳ ساعت طول
+# می‌کشد؛ بیلدهای موازی فقط منابع را هدر می‌دهند).
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  # تست‌های منطقی سریع؛ اگر اینها رد شوند، بیلد ۱-۳ ساعته‌ی APK بی‌فایده است
+  # ---------------------------------------------------------------------
+  # مرحله ۱: تست‌های سریع
+  # ---------------------------------------------------------------------
+  # بیلد APK بین ۱ تا ۳ ساعت طول می‌کشد. بی‌معنی است که این همه زمان صرف
+  # شود و بعد معلوم شود یک خطای نگارشی ساده وجود داشته.
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -25,6 +35,7 @@ jobs:
 
       - name: Static checks (pyflakes)
         run: |
+          set -euo pipefail
           # src/ui.py یک shim سازگاری است (re-export عمدی) و import آن در
           # main.py برای ثبت ویجت‌ها در Factory لازم است - این سه مورد
           # هشدار مورد انتظارند و فیلتر می‌شوند؛ هر هشدار دیگری بیلد را
@@ -39,9 +50,12 @@ jobs:
       - name: Compile all sources
         run: python -m compileall -q src main.py p4a-recipes
 
-      - name: Unit tests (voice pipeline, VAD, wake word, STT selection)
+      - name: Unit tests
         run: python -m unittest discover -s tests -v
 
+  # ---------------------------------------------------------------------
+  # مرحله ۲: بیلد واقعی APK
+  # ---------------------------------------------------------------------
   build:
     needs: tests
     runs-on: ubuntu-latest
@@ -58,6 +72,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             openjdk-17-jdk \
@@ -67,6 +82,16 @@ jobs:
             libltdl-dev \
             libssl-dev libtool pkg-config \
             python3-dev zlib1g-dev zip unzip wget
+
+      - name: Free up disk space
+        # بیلد p4a (NDK + SDK + سورس llama.cpp + آبجکت‌ها) به‌راحتی از ۲۰
+        # گیگابایت عبور می‌کند و رانرهای گیت‌هاب فضای محدودی دارند. شکست
+        # به‌خاطر پر شدن دیسک معمولاً با پیام‌های گمراه‌کننده ظاهر می‌شود.
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+                      /opt/ghc /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
 
       - name: Cache buildozer artifacts
         uses: actions/cache@v4
@@ -79,30 +104,137 @@ jobs:
 
       - name: Install Python dependencies
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install --upgrade Cython==0.29.36 wheel setuptools
           pip install buildozer
 
+      # -----------------------------------------------------------------
+      # اصلاح باگ اصلی: پنهان شدن شکست بیلد
+      # -----------------------------------------------------------------
+      # نسخه‌ی قبلی این‌طور بود:
+      #
+      #     buildozer -v android debug 2>&1 | tee build.log
+      #     echo "BUILD_RESULT=$?" >> $GITHUB_ENV
+      #
+      # دو اشکال مستقل داشت:
+      #  ۱) در یک pipeline، کد خروجی نهایی متعلق به *آخرین* دستور یعنی
+      #     tee است. tee تقریباً همیشه موفق است، پس حتی وقتی buildozer با
+      #     خطا خارج می‌شد، مرحله سبز می‌ماند. (bash بدون pipefail)
+      #  ۲) ‏$? در خط بعدی، کد خروجی خودِ pipeline قبلی را می‌خواند اما
+      #     چون در خط جداگانه‌ای بعد از اجرای echo قرار داشت عملاً
+      #     بی‌معنی بود و هیچ‌جا هم بررسی نمی‌شد.
+      #
+      # با `set -o pipefail` کد خروجی buildozer حفظ می‌شود و مرحله واقعاً
+      # قرمز می‌شود.
       - name: Build APK
         run: |
           set -o pipefail
           buildozer -v android debug 2>&1 | tee build.log
 
+      # -----------------------------------------------------------------
+      # تأیید صریح وجود APK
+      # -----------------------------------------------------------------
+      # حتی اگر buildozer کد ۰ برگرداند، وجود واقعی فایل APK را مستقل
+      # بررسی می‌کنیم. «موفقیت» بدون APK یعنی شکست.
+      - name: Verify APK exists
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          apks=(bin/*.apk)
+          if [ ${#apks[@]} -eq 0 ]; then
+            echo "::error::هیچ فایل APK ای در پوشه‌ی bin/ ساخته نشد."
+            ls -la bin/ 2>/dev/null || echo "پوشه‌ی bin وجود ندارد"
+            exit 1
+          fi
+
+          apk="${apks[0]}"
+          size=$(stat -c%s "$apk")
+          echo "APK: $apk  (${size} بایت)"
+
+          # یک APK واقعی برای این پروژه ده‌ها مگابایت است (پایتون + Kivy +
+          # SDL + llama.cpp). هر چیزی کمتر از ۵ مگابایت یعنی بیلد ناقص.
+          if [ "$size" -lt 5000000 ]; then
+            echo "::error::حجم APK غیرعادی است (${size} بایت) - بیلد ناقص."
+            exit 1
+          fi
+
+          # APK باید یک zip معتبر باشد و کتابخانه‌های حیاتی را داشته باشد.
+          unzip -l "$apk" > apk_contents.txt
+          echo "--- کتابخانه‌های native داخل APK ---"
+          grep -E "lib/.*\.so$" apk_contents.txt || true
+
+          missing=0
+          for lib in libllama.so libvina_llm.so libc++_shared.so libpython3.11.so; do
+            if grep -q "$lib" apk_contents.txt; then
+              echo "موجود: $lib"
+            else
+              echo "::error::کتابخانه‌ی ضروری در APK نیست: $lib"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+
+          # libvosk اختیاری است (تشخیص گفتار آفلاین)
+          if grep -q "libvosk.so" apk_contents.txt; then
+            echo "موجود: libvosk.so (تشخیص گفتار آفلاین فعال)"
+          else
+            echo "::warning::libvosk.so در APK نیست - تشخیص گفتار آفلاین"\
+                 "غیرفعال است؛ برنامه از SpeechRecognizer اندروید استفاده می‌کند."
+          fi
+
+          sha256sum "$apk" | tee apk.sha256
+          {
+            echo "### ✅ APK ساخته شد"
+            echo ""
+            echo "| مورد | مقدار |"
+            echo "|------|-------|"
+            echo "| فایل | \`$(basename "$apk")\` |"
+            echo "| حجم | $(numfmt --to=iec-i --suffix=B "$size") |"
+            echo "| SHA256 | \`$(cut -d' ' -f1 apk.sha256)\` |"
+            echo "| کامیت | \`${GITHUB_SHA}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Summarise build failure
         if: failure()
         run: |
-          echo "### آخرین خطاهای بیلد" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          grep -iE "error|failed|exception" build.log | tail -40 >> $GITHUB_STEP_SUMMARY || true
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### ❌ آخرین خطاهای بیلد" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f build.log ]; then
+            grep -iE "error|failed|exception|Traceback" build.log | tail -60 \
+              >> "$GITHUB_STEP_SUMMARY" || true
+          else
+            echo "فایل build.log ساخته نشد." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload APK
+      # لاگ بیلد همیشه آپلود می‌شود (برای عیب‌یابی)، حتی وقتی بیلد شکست خورده
+      - name: Upload build log
         if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build.log
+            apk_contents.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      # -----------------------------------------------------------------
+      # آپلود APK
+      # -----------------------------------------------------------------
+      # تفاوت کلیدی با نسخه‌ی قبلی:
+      #  • فقط وقتی اجرا می‌شود که بیلد موفق بوده (نه always) - وگرنه یک
+      #    artifact «موفق» شامل صرفاً build.log تولید می‌شد که دقیقاً همان
+      #    چیزی است که باعث گمراهی شد.
+      #  • if-no-files-found: error - نبودِ APK یعنی شکست، نه هشدار.
+      #  • build.log از این artifact جدا شد تا artifact خالی غیرممکن شود.
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: vinabot-apk
           path: |
             bin/*.apk
-            build.log
+            apk.sha256
           retention-days: 30
-          if-no-files-found: warn
+          if-no-files-found: error

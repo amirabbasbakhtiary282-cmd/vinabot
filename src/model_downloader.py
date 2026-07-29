@@ -19,6 +19,8 @@
 import os
 import threading
 
+from src import model_paths
+
 
 class ModelDownloader:
     """کلاس دانلود مدل‌های زبانی سبک (GGUF)"""
@@ -50,27 +52,17 @@ class ModelDownloader:
         self._cancel_event = threading.Event()
 
     def _get_models_dir(self):
-        """مسیر پوشه‌ی مدل‌ها"""
-        possible_paths = [
-            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models'),
-            '/data/data/org.vinabot/files/models',
-            os.path.expanduser('~/.vina/models'),
-        ]
-        for path in possible_paths:
-            try:
-                os.makedirs(path, exist_ok=True)
-                return path
-            except Exception:
-                continue
-        return possible_paths[0]
+        """مسیر پوشه‌ی مدل‌ها (مرجع واحد: src/model_paths.py).
+
+        قبلاً این تابع لیست مسیر جداگانه‌ی خودش را داشت که با لیست
+        src/brain.py یکی نبود؛ نتیجه این می‌شد که مدل در یک پوشه دانلود
+        شود ولی موتور از پوشه‌ی دیگری دنبالش بگردد.
+        """
+        return model_paths.get_models_dir()
 
     def list_installed_models(self):
-        """لیست تمام فایل‌های GGUF موجود در پوشه‌ی مدل‌ها"""
-        if not os.path.isdir(self.models_dir):
-            return []
-        return sorted(
-            f for f in os.listdir(self.models_dir) if f.lower().endswith('.gguf')
-        )
+        """لیست نام تمام فایل‌های GGUF پیدا شده (در همه‌ی مسیرهای شناخته‌شده)"""
+        return [os.path.basename(p) for p in model_paths.find_models()]
 
     def has_any_model(self):
         return len(self.list_installed_models()) > 0

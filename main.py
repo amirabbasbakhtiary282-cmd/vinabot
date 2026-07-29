@@ -165,8 +165,31 @@ class VinaApp(App):
             Clock.schedule_once(
                 lambda dt: setattr(self, 'model_status', fix_rtl('در حال بارگذاری مدل زبانی...')), 0
             )
+
+            # پوشه‌ی مدل‌ها همیشه ساخته می‌شود، حتی وقتی هیچ مدلی نیست.
+            # (خواسته‌ی صریح: برنامه باید پوشه‌ی Models را خودکار بسازد تا
+            # کاربر بتواند فایل را داخلش کپی کند.)
+            from src import model_paths
+            try:
+                models_dir = model_paths.ensure_models_dir()
+                print(f'وینا: پوشه‌ی مدل‌ها: {models_dir}')
+            except Exception as exc:
+                print(f'وینا: ساخت پوشه‌ی مدل‌ها ناموفق بود: {exc}')
+
             loaded = self.brain.load_model()
-            status = 'آماده' if loaded else 'بدون مدل - در تنظیمات دانلود کنید'
+
+            if loaded:
+                status = 'آماده'
+            elif self.brain.engine.load_error:
+                # مدل پیدا شد ولی بارگذاری نشد - این با «مدلی نیست» فرق
+                # دارد و کاربر باید تفاوت را بفهمد.
+                status = 'خطا در بارگذاری مدل - جزئیات در تنظیمات'
+                print(f'وینا: خطای بارگذاری مدل: {self.brain.engine.load_error}')
+            else:
+                status = 'بدون مدل - از تنظیمات یک مدل اضافه کنید'
+                print('وینا: هیچ فایل GGUF پیدا نشد. مسیرهای بررسی‌شده:\n'
+                      + model_paths.describe_search_locations())
+
             Clock.schedule_once(lambda dt: setattr(self, 'model_status', fix_rtl(status)), 0)
         except Exception as exc:
             error_text = f'خطا: {str(exc)[:50]}'

@@ -8,7 +8,12 @@ title = Vina AI
 package.name = vinabot
 package.domain = org
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,kv,atlas,ttf,otf,eot,woff,json,gguf,so
+# نکته‌ی مهم: پسوند gguf عمداً در این لیست **نیست**.
+# اگر باشد، هر فایل مدلی که در پوشه‌ی پروژه وجود داشته باشد داخل APK
+# بسته‌بندی می‌شود و حجم APK را صدها مگابایت بالا می‌برد - دقیقاً برخلاف
+# خواسته‌ی پروژه («مدل نباید داخل APK باشد؛ APK باید سبک بماند»).
+# مدل در زمان اجرا از حافظه‌ی دستگاه خوانده می‌شود (src/model_paths.py).
+source.include_exts = py,png,jpg,jpeg,kv,atlas,ttf,otf,eot,woff,json,so
 version = 1.0.0
 
 # نام کامل برنامه
@@ -48,7 +53,13 @@ android.debug_artifact = apk
 android.enable_r8 = False
 
 # منابع (فایل‌های اضافی)
-source.include_patterns = assets/*,models/*.gguf
+# فقط assets (فونت و آیکون). الگوی models/*.gguf عمداً حذف شد تا مدل
+# هرگز داخل APK نرود.
+source.include_patterns = assets/*
+
+# فایل‌های حجیم/غیرضروری نباید وارد بسته شوند
+source.exclude_exts = gguf,bin,zip,tar,gz,apk,aab,log
+source.exclude_dirs = tests,bin,.buildozer,ci,models,p4a-recipes,__pycache__,.github
 
 # تنظیمات P4A
 p4a.branch = master
