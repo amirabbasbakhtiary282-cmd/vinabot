@@ -20,11 +20,20 @@ from os.path import exists, join
 
 from pythonforandroid.logger import info, shprint
 from pythonforandroid.recipe import Recipe
-from pythonforandroid.util import current_directory, ensure_dir
+from pythonforandroid.util import current_directory
 
 import sh
 
 # نگاشت نام ABI اندروید در p4a به نام پوشه در آرشیو رسمی Vosk
+def arch_name(arch):
+    """نام معماری، چه شیء Arch داده شود چه رشته.
+
+    python-for-android یکدست نیست: prepare_build_dir رشته می‌گیرد ولی
+    should_build/build_arch شیء Arch. (جزئیات در p4a-recipes/vinallm.)
+    """
+    return arch if isinstance(arch, str) else arch.arch
+
+
 ABI_MAP = {
     'arm64-v8a': 'arm64-v8a',
     'armeabi-v7a': 'armeabi-v7a',
@@ -44,12 +53,21 @@ class VoskRecipe(Recipe):
     built_libraries = {'libvosk.so': '.'}
 
     def should_build(self, arch):
-        return not exists(join(self.get_build_dir(arch.arch), 'libvosk.so'))
+        # توجه: should_build یک شیء Arch می‌گیرد (نه رشته) - build.py خط ۵۲۹
+        return not exists(join(self.get_build_dir(arch_name(arch)), 'libvosk.so'))
 
-    def prepare_build_dir(self, arch):
-        """آرشیو رسمی را دانلود و استخراج می‌کند."""
-        ensure_dir(self.get_build_dir(arch))
-        super().prepare_build_dir(arch)
+    # نکته‌ی مهم: prepare_build_dir را override نمی‌کنیم.
+    #
+    # نسخه‌ی قبلی این کار را می‌کرد:
+    #     ensure_dir(self.get_build_dir(arch))
+    #     super().prepare_build_dir(arch)
+    #
+    # که یک باگ *بی‌صدا* بود: متد unpack در p4a فقط وقتی آرشیو را استخراج
+    # می‌کند که پوشه‌ی مقصد هنوز وجود نداشته باشد
+    # (recipe.py: ``if not exists(directory_name) or not isdir(...)``).
+    # ساختن آن پوشه از قبل باعث می‌شد استخراج کاملاً نادیده گرفته شود و
+    # بعداً build_arch با «libvosk.so پیدا نشد» شکست بخورد - بدون هیچ
+    # پیام روشنی درباره‌ی علت واقعی. رفتار پیش‌فرض کلاس پایه درست است.
 
     def build_arch(self, arch):
         """libvosk.so مربوط به ABI هدف را از آرشیو استخراج‌شده برمی‌دارد.
@@ -59,8 +77,9 @@ class VoskRecipe(Recipe):
         اما بسته به نسخه ممکن است یک لایه پوشه‌ی اضافه داشته باشد، پس
         به‌جای فرض کردن مسیر دقیق، فایل را جستجو می‌کنیم.
         """
-        build_dir = self.get_build_dir(arch.arch)
-        abi = ABI_MAP.get(arch.arch, arch.arch)
+        name = arch_name(arch)
+        build_dir = self.get_build_dir(name)
+        abi = ABI_MAP.get(name, name)
 
         info(f'Vosk: locating libvosk.so for ABI={abi}')
 

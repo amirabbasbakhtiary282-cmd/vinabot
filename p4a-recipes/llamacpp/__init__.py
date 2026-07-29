@@ -23,6 +23,16 @@ from pythonforandroid.recipe import Recipe
 from pythonforandroid.util import current_directory
 
 
+def arch_name(arch):
+    """نام معماری، چه شیء Arch داده شود چه رشته.
+
+    python-for-android در فراخوانی متدهای recipe یکدست نیست:
+    prepare_build_dir رشته می‌گیرد، اما should_build/build_arch شیء Arch.
+    (توضیح کامل در p4a-recipes/vinallm/__init__.py)
+    """
+    return arch if isinstance(arch, str) else arch.arch
+
+
 class LlamaCppRecipe(Recipe):
     # نسخه‌ی پین‌شده و تست‌شده (به‌جای master، برای بازتولیدپذیری بیلد)
     version = "b5026"
@@ -64,18 +74,19 @@ class LlamaCppRecipe(Recipe):
 
     def build_arch(self, arch):
         env = self.get_recipe_env(arch)
-        build_dir = self.get_build_dir(arch.arch)
+        name = arch_name(arch)
+        build_dir = self.get_build_dir(name)
 
         toolchain_file = join(self.ctx.ndk_dir, "build", "cmake", "android.toolchain.cmake")
 
-        info(f"Building llama.cpp for arch={arch.arch} api={self.ctx.ndk_api}")
+        info(f"Building llama.cpp for arch={name} api={self.ctx.ndk_api}")
 
         with current_directory(build_dir):
             shprint(
                 sh.cmake,
                 "-B", "build",
                 "-DCMAKE_TOOLCHAIN_FILE=" + toolchain_file,
-                "-DANDROID_ABI=" + arch.arch,
+                "-DANDROID_ABI=" + name,
                 "-DANDROID_PLATFORM=android-" + str(self.ctx.ndk_api),
                 "-DANDROID_STL=c++_shared",
                 "-DCMAKE_BUILD_TYPE=Release",
