@@ -36,7 +36,10 @@ android.ndk_api = 24
 # SET_ALARM، RECEIVE_BOOT_COMPLETED و MODIFY_AUDIO_SETTINGS از نسخه‌ی قبلی
 # حذف شدند چون هیچ کدی در این پروژه از آن‌ها استفاده نمی‌کرد (درخواست مجوز
 # بدون استفاده‌ی واقعی هم گمراه‌کننده است و هم اعتماد کاربر را کاهش می‌دهد).
-android.permissions = INTERNET,RECORD_AUDIO,ACCESS_NETWORK_STATE,VIBRATE,WAKE_LOCK,android.permission.WRITE_SETTINGS,android.permission.POST_NOTIFICATIONS
+# - FOREGROUND_SERVICE(+MICROPHONE): لازم برای ادامه‌ی گفتگوی صوتی وقتی
+#   صفحه خاموش می‌شود یا کاربر به اپ دیگری می‌رود (اندروید 14 نوع سرویس را
+#   هم می‌خواهد).
+android.permissions = INTERNET,RECORD_AUDIO,ACCESS_NETWORK_STATE,VIBRATE,WAKE_LOCK,android.permission.WRITE_SETTINGS,android.permission.POST_NOTIFICATIONS,android.permission.FOREGROUND_SERVICE,android.permission.FOREGROUND_SERVICE_MICROPHONE,android.permission.MODIFY_AUDIO_SETTINGS
 
 # تنظیمات کامپایلر
 android.accept_sdk_license = True
@@ -57,14 +60,15 @@ p4a.local_recipes = ./p4a-recipes
 
 # وابستگی‌ها:
 # - llamacpp, vinallm: موتور استنتاج مدل زبانی محلی (native، بدون llama-cpp-python)
-# - pyjnius: دسترسی به APIهای اندروید (TTS، SpeechRecognizer، تنظیمات سیستم)
+# - pyjnius: دسترسی به APIهای اندروید (TTS، SpeechRecognizer، AudioRecord، تنظیمات سیستم)
+# - vosk: کتابخانه‌ی native تشخیص گفتار آفلاین (از طریق ctypes استفاده می‌شود)
 # - plyer: باتری و سایر سنسورهای استاندارد
 # - arabic_reshaper, python-bidi: نمایش صحیح متن فارسی/عربی (شکل‌دهی حروف و RTL)
 # - requests, beautifulsoup4: جستجوی اینترنتی
 # نکته: vosk حذف شده چون تشخیص گفتار اکنون از android.speech.SpeechRecognizer
 # داخلی استفاده می‌کند (بدون نیاز به دانلود مدل جداگانه)؛ llama-cpp-python هم
 # حذف شده چون کراس‌کامپایل آن برای اندروید غیرقابل‌اعتماد است.
-requirements = python3,kivy==2.3.1,openssl,requests,beautifulsoup4,sqlite3,pyjnius,plyer,arabic_reshaper,python-bidi==0.4.2,pygments,android,llamacpp,vinallm
+requirements = python3,kivy==2.3.1,openssl,requests,beautifulsoup4,sqlite3,pyjnius,plyer,arabic_reshaper,python-bidi==0.4.2,pygments,android,llamacpp,vinallm,vosk
 
 android.gradle_dependencies =
 

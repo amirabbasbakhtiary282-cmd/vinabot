@@ -33,6 +33,7 @@ class AndroidBridge:
         self._tts = None
         self._activity = None
         self._speech_recognizer = None
+        self._speech_holder = None
 
         if self._android:
             try:
@@ -74,11 +75,47 @@ class AndroidBridge:
     # متن به گفتار (TTS) - از طریق android.speech.tts.TextToSpeech واقعی
     # ------------------------------------------------------------------
     def _ensure_tts(self):
+        """ساخت موتور TTS و *صبر کردن* تا واقعاً آماده شود.
+
+        نکته‌ی مهم: ``TextToSpeech(activity, null)`` بلافاصله برنمی‌گردد؛
+        مقداردهی آن asynchronous است. اگر بلافاصله بعد از ساخت،
+        ``speak()`` صدا زده شود، آن جمله بی‌صدا دور ریخته می‌شود (باگ رایج
+        «اولین جمله گفته نمی‌شود»). به همین دلیل اینجا یک OnInitListener
+        واقعی ثبت می‌کنیم و تا آماده شدن (حداکثر ۵ ثانیه) صبر می‌کنیم.
+        """
         if self._tts is not None or not self._android:
             return self._tts
         try:
+            import threading as _threading
+
+            from jnius import PythonJavaClass, java_method
+
             TextToSpeech = self._autoclass('android.speech.tts.TextToSpeech')
-            self._tts = TextToSpeech(self._activity, None)
+            ready = _threading.Event()
+            status_holder = {}
+
+            class _InitListener(PythonJavaClass):
+                __javainterfaces__ = ['android/speech/tts/TextToSpeech$OnInitListener']
+                __javacontext__ = 'app'
+
+                @java_method('(I)V')
+                def onInit(self, status):
+                    status_holder['status'] = status
+                    ready.set()
+
+            listener = _InitListener()
+            # نگه‌داشتن ارجاع تا زنده بماند (جلوگیری از GC شدن)
+            self._tts_init_listener = listener
+            tts = TextToSpeech(self._activity, listener)
+
+            if not ready.wait(timeout=5.0):
+                print("هشدار: موتور TTS در زمان انتظار آماده نشد")
+            elif status_holder.get('status') != TextToSpeech.SUCCESS:
+                print(f"خطا: موتور TTS آماده نشد (کد {status_holder.get('status')})")
+                self._tts = None
+                return None
+
+            self._tts = tts
         except Exception as exc:
             print(f"خطا در مقداردهی TTS: {exc}")
             self._tts = None
@@ -98,8 +135,14 @@ class AndroidBridge:
         except Exception:
             return False
 
-    def speak(self, text):
-        """گویش متن با موتور TTS داخلی اندروید"""
+    def speak(self, text, queue=False):
+        """گویش متن با موتور TTS داخلی اندروید.
+
+        ``queue=True`` برای گفتار جریانی لازم است: در گفتگوی زنده، پاسخ مدل
+        جمله‌به‌جمله می‌رسد و هر جمله باید *پشت* جمله‌ی قبلی صف شود
+        (QUEUE_ADD). اگر QUEUE_FLUSH استفاده شود، هر جمله‌ی جدید جمله‌ی
+        قبلی را وسط حرف قطع می‌کند و کاربر فقط آخرین جمله را می‌شنود.
+        """
         if not text:
             return False
         if not self._android:
@@ -111,10 +154,45 @@ class AndroidBridge:
             return False
         try:
             TextToSpeechClass = self._autoclass('android.speech.tts.TextToSpeech')
-            tts.speak(text, TextToSpeechClass.QUEUE_FLUSH, None, None)
+            mode = TextToSpeechClass.QUEUE_ADD if queue else TextToSpeechClass.QUEUE_FLUSH
+            # utteranceId یکتا لازم است تا بتوان پایان هر جمله را دنبال کرد
+            self._utterance_counter = getattr(self, '_utterance_counter', 0) + 1
+            utt_id = f'vina-{self._utterance_counter}'
+            tts.speak(text, mode, None, utt_id)
             return True
         except Exception as exc:
             print(f"خطا در speak(): {exc}")
+            return False
+
+    def is_speaking(self):
+        """آیا موتور TTS همین حالا در حال حرف زدن است؟"""
+        if not self._android or self._tts is None:
+            return False
+        try:
+            return bool(self._tts.isSpeaking())
+        except Exception:
+            return False
+
+    def set_speech_rate(self, rate):
+        """سرعت گفتار (۰.۵ تا ۲.۰؛ ۱.۰ = عادی)"""
+        tts = self._ensure_tts()
+        if not tts:
+            return False
+        try:
+            tts.setSpeechRate(float(max(0.1, min(3.0, rate))))
+            return True
+        except Exception:
+            return False
+
+    def set_pitch(self, pitch):
+        """زیر و بمی صدا (۰.۵ تا ۲.۰؛ ۱.۰ = عادی)"""
+        tts = self._ensure_tts()
+        if not tts:
+            return False
+        try:
+            tts.setPitch(float(max(0.1, min(3.0, pitch))))
+            return True
+        except Exception:
             return False
 
     def stop_speaking(self):
@@ -135,11 +213,14 @@ class AndroidBridge:
     # ------------------------------------------------------------------
     # گفتار به متن (STT) - از طریق android.speech.SpeechRecognizer واقعی
     # ------------------------------------------------------------------
-    def listen_once(self, on_result, on_error, language='fa-IR', timeout_sec=12):
+    def listen_once(self, on_result, on_error, language='fa-IR', timeout_sec=12,
+                    on_partial=None, on_rms=None):
         """یک بار گوش می‌دهد و متن تشخیص داده‌شده را از طریق callback برمی‌گرداند.
 
         این متد asynchronous است: بلافاصله برمی‌گردد و نتیجه با فراخوانی
-        on_result(text) یا on_error(message) اعلام می‌شود.
+        on_result(text) یا on_error(message) اعلام می‌شود. اگر ``on_partial``
+        داده شود، نتایج موقت (حین صحبت) هم گزارش می‌شوند تا رابط کاربری
+        بتواند متن را زنده نمایش دهد.
         """
         if not self._android:
             on_error("گفتار به متن فقط روی اندروید در دسترس است.")
@@ -162,11 +243,14 @@ class AndroidBridge:
             class _Listener(PythonJavaClass):
                 __javainterfaces__ = ['android/speech/RecognitionListener']
 
-                def __init__(self, result_cb, error_cb, recognizer_holder):
+                def __init__(self, result_cb, error_cb, recognizer_holder,
+                             partial_cb=None, rms_cb=None):
                     super().__init__()
                     self.result_cb = result_cb
                     self.error_cb = error_cb
                     self.recognizer_holder = recognizer_holder
+                    self.partial_cb = partial_cb
+                    self.rms_cb = rms_cb
 
                 @java_method('(Landroid/os/Bundle;)V')
                 def onReadyForSpeech(self, params):
@@ -178,7 +262,12 @@ class AndroidBridge:
 
                 @java_method('(F)V')
                 def onRmsChanged(self, rmsdB):
-                    pass
+                    # سطح صدا برای انیمیشن موج صوتی در رابط کاربری
+                    if self.rms_cb:
+                        try:
+                            self.rms_cb(rmsdB)
+                        except Exception:
+                            pass
 
                 @java_method('([B)V')
                 def onBufferReceived(self, buffer):
@@ -219,7 +308,15 @@ class AndroidBridge:
 
                 @java_method('(Landroid/os/Bundle;)V')
                 def onPartialResults(self, partialResults):
-                    pass
+                    if not self.partial_cb:
+                        return
+                    try:
+                        matches = partialResults.getStringArrayList(
+                            SpeechRecognizer.RESULTS_RECOGNITION)
+                        if matches and matches.size() > 0:
+                            self.partial_cb(matches.get(0))
+                    except Exception:
+                        pass
 
                 @java_method('(ILandroid/os/Bundle;)V')
                 def onEvent(self, eventType, params):
@@ -237,16 +334,47 @@ class AndroidBridge:
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
                 intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
 
-                listener = _Listener(on_result, on_error, recognizer_holder)
+                intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, True)
+
+                listener = _Listener(on_result, on_error, recognizer_holder,
+                                     partial_cb=on_partial, rms_cb=on_rms)
                 recognizer = SpeechRecognizer.createSpeechRecognizer(self._activity)
                 recognizer.setRecognitionListener(listener)
                 recognizer_holder['instance'] = recognizer
                 recognizer_holder['listener'] = listener
                 recognizer.startListening(intent)
 
+            # نگه‌داشتن ارجاع روی خود شیء (نه فقط متغیر محلی): در غیر این
+            # صورت garbage collector پایتون ممکن است listener/recognizer را
+            # وسط تشخیص آزاد کند و باعث کرش JNI یا قطع شدن بی‌دلیل شود.
+            self._speech_holder = recognizer_holder
             _start()
         except Exception as exc:
             on_error(f"خطا در راه‌اندازی تشخیص گفتار: {exc}")
+
+    def stop_listening(self):
+        """توقف فوری تشخیص گفتار در حال اجرا (مثلاً وقتی کاربر لغو می‌کند)."""
+        holder = getattr(self, '_speech_holder', None)
+        if not holder:
+            return
+        recognizer = holder.get('instance')
+        if not recognizer:
+            return
+        try:
+            from android.runnable import run_on_ui_thread
+
+            @run_on_ui_thread
+            def _stop():
+                try:
+                    recognizer.cancel()
+                    recognizer.destroy()
+                except Exception:
+                    pass
+
+            _stop()
+        except Exception:
+            pass
+        self._speech_holder = None
 
     # ------------------------------------------------------------------
     # باز کردن برنامه‌های دیگر (از طریق PackageManager واقعی، نه شل)

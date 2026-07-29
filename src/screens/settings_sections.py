@@ -307,25 +307,69 @@ def build_voice(container):
     container.add_widget(_slider_card('زیر و بمی صدا', 1.0, 0.5, 2.0, lambda v: None))
 
     container.add_widget(_section_label('گفتار به متن (STT)'))
-    info_card = GlassCard(orientation='vertical', size_hint_y=None, height=dp(70),
-                           padding=[dp(16), dp(10), dp(16), dp(10)], radius=theme.radius_lg)
-    info_label = Label(
-        text=fix_rtl('تشخیص گفتار از موتور داخلی اندروید استفاده می‌کند و نیازی '
-                     'به دانلود مدل جداگانه ندارد.'),
-        font_name=theme.font_name, font_size='11.5sp', color=theme.text_secondary,
+
+    info = app.voice.stt_engine_info() if getattr(app, 'voice', None) else {}
+
+    # انتخاب موتور: آفلاین (Vosk) در برابر آنلاین (گوگل)
+    offline_card = SettingsCard(
+        icon='🔒', title_text=fix_rtl('تشخیص گفتار آفلاین (Vosk)'),
+        description_text=fix_rtl('صدای شما هرگز از گوشی خارج نمی‌شود - پیشنهاد '
+                                 'می‌شود برای حفظ حریم خصوصی روشن بماند'),
+        control=_make_switch(app.prefer_offline_stt,
+                             lambda v: app.set_offline_stt(v)),
+    )
+    container.add_widget(offline_card)
+
+    # نمایش شفاف اینکه همین الان کدام موتور فعال است
+    status_card = GlassCard(orientation='vertical', size_hint_y=None, height=dp(74),
+                            padding=[dp(16), dp(10), dp(16), dp(10)], radius=theme.radius_lg)
+    status_label = Label(
+        text=fix_rtl('موتور فعال: ' + info.get('label', 'نامشخص')),
+        font_name=theme.font_name, font_size='11.5sp',
+        color=theme.success if info.get('offline') and not info.get('needs_download')
+        else theme.warning,
         halign='right', valign='middle',
     )
-    info_label.bind(size=lambda inst, *a: setattr(inst, 'text_size', (inst.width, None)))
-    info_card.add_widget(info_label)
-    container.add_widget(info_card)
+    status_label.bind(size=lambda inst, *a: setattr(inst, 'text_size', (inst.width, None)))
+    status_card.add_widget(status_label)
+    container.add_widget(status_card)
+
+    # دانلود مدل‌های آفلاین
+    container.add_widget(_section_label('مدل‌های آفلاین تشخیص گفتار'))
+    try:
+        from src.model_downloader import VoskModelDownloader
+        for item in VoskModelDownloader().list_available():
+            lang = item['lang']
+            container.add_widget(SettingsCard(
+                icon='✅' if item['installed'] else '⬇️',
+                title_text=fix_rtl(item['label']),
+                description_text=fix_rtl(
+                    'نصب شده' if item['installed']
+                    else f"حدود {item['size_mb']} مگابایت - یک‌بار دانلود، بعد از آن آفلاین"),
+                value_text=fix_rtl('نصب شده' if item['installed'] else 'دانلود'),
+                on_release=(None if item['installed']
+                            else (lambda *_a, l=lang: app.download_stt_model(l))),
+            ))
+    except Exception as exc:  # noqa: BLE001
+        container.add_widget(_section_label(f'خطا در خواندن مدل‌ها: {exc}'))
+
+    container.add_widget(_section_label('گفتگوی زنده'))
+    container.add_widget(SettingsCard(
+        icon='✋', title_text=fix_rtl('قطع کردن وسط صحبت'),
+        description_text=fix_rtl('اگر وسط حرف زدن وینا صحبت کنید، ساکت می‌شود و گوش می‌دهد'),
+        control=_make_switch(app.barge_in_enabled,
+                             lambda v: setattr(app, 'barge_in_enabled', v)),
+    ))
 
     container.add_widget(_section_label('کلمه‌ی فعال‌سازی (Wake Word)'))
-    wake_card = SettingsCard(
-        icon='👂', title_text=fix_rtl('«هی وینا»'),
-        description_text=fix_rtl('غیرفعال - نیاز به موتور آفلاین اختصاصی دارد'),
-        value_text=fix_rtl('به‌زودی'),
-    )
-    container.add_widget(wake_card)
+    container.add_widget(SettingsCard(
+        icon='👂', title_text=fix_rtl('«هی وینا» / «سلام وینا»'),
+        description_text=fix_rtl(
+            'در حالت گفتگوی زنده، فقط وقتی پاسخ می‌دهد که نامش را صدا بزنید. '
+            'نیازمند مدل آفلاین است.'),
+        control=_make_switch(app.wake_word_enabled,
+                             lambda v: setattr(app, 'wake_word_enabled', v)),
+    ))
 
 
 # ==========================================================================

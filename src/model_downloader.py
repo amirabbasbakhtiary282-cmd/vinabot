@@ -148,3 +148,142 @@ class ModelDownloader:
                 'installed': key in installed,
             })
         return result
+
+
+# ==========================================================================
+# دانلود مدل تشخیص گفتار آفلاین (Vosk)
+# ==========================================================================
+class VoskModelDownloader:
+    """دانلود و استخراج مدل‌های آفلاین Vosk.
+
+    برخلاف مدل‌های GGUF (یک فایل تکی)، مدل‌های Vosk به‌صورت فایل zip توزیع
+    می‌شوند و باید استخراج شوند. این کلاس هر دو مرحله را با گزارش پیشرفت و
+    قابلیت لغو انجام می‌دهد، و استخراج را در برابر مسیرهای مخرب داخل zip
+    (حمله‌ی Zip Slip) ایمن می‌کند.
+    """
+
+    def __init__(self):
+        from src.stt_engine import VOSK_MODELS, get_vosk_models_dir
+        self.models = VOSK_MODELS
+        self.models_dir = get_vosk_models_dir()
+        self.progress_callback = None
+        self.status_callback = None
+        self._cancel_event = threading.Event()
+
+    def _status(self, message):
+        if self.status_callback:
+            self.status_callback(message)
+
+    def _progress(self, key, percent):
+        if self.progress_callback:
+            self.progress_callback(key, percent)
+
+    def cancel(self):
+        self._cancel_event.set()
+
+    def is_installed(self, lang='fa'):
+        from src.stt_engine import find_vosk_model
+        return find_vosk_model(lang) is not None
+
+    def list_available(self):
+        """اطلاعات مدل‌های صوتی برای نمایش در تنظیمات."""
+        out = []
+        for lang, info in self.models.items():
+            out.append({
+                'lang': lang,
+                'label': info['label'],
+                'size_mb': round(info['size'] / (1024 * 1024)),
+                'installed': self.is_installed(lang),
+            })
+        return out
+
+    def download(self, lang='fa'):
+        """دانلود و استخراج مدل زبان مورد نظر. بازگشت True/False."""
+        info = self.models.get(lang)
+        if not info:
+            self._status(f'زبان پشتیبانی نمی‌شود: {lang}')
+            return False
+
+        if self.is_installed(lang):
+            self._status(f"{info['label']} از قبل نصب شده است.")
+            return True
+
+        self._cancel_event.clear()
+        os.makedirs(self.models_dir, exist_ok=True)
+        zip_path = os.path.join(self.models_dir, info['name'] + '.zip.part')
+
+        try:
+            import requests
+
+            self._status(f"در حال دانلود مدل {info['label']}...")
+            response = requests.get(info['url'], stream=True, timeout=60)
+            response.raise_for_status()
+
+            total = int(response.headers.get('content-length', info['size']))
+            downloaded = 0
+            with open(zip_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=65536):
+                    if self._cancel_event.is_set():
+                        raise InterruptedError('دانلود توسط کاربر لغو شد')
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total:
+                        # دانلود ۹۰٪ نوار پیشرفت، استخراج ۱۰٪ باقی‌مانده
+                        self._progress(lang, (downloaded / total) * 90)
+
+            self._status('در حال استخراج مدل...')
+            self._safe_extract(zip_path, self.models_dir, lang)
+            self._progress(lang, 100)
+
+            os.remove(zip_path)
+            if not self.is_installed(lang):
+                self._status('استخراج ناقص بود؛ لطفاً دوباره تلاش کنید.')
+                return False
+
+            self._status(f"مدل {info['label']} آماده‌ی استفاده است.")
+            return True
+
+        except Exception as exc:  # noqa: BLE001
+            self._status(f'خطا در دریافت مدل: {str(exc)[:120]}')
+            for leftover in (zip_path,):
+                if os.path.exists(leftover):
+                    try:
+                        os.remove(leftover)
+                    except OSError:
+                        pass
+            return False
+
+    def _safe_extract(self, zip_path, dest_dir, lang):
+        """استخراج ایمن zip (جلوگیری از نوشتن خارج از پوشه‌ی مقصد)."""
+        import zipfile
+
+        dest_abs = os.path.abspath(dest_dir)
+        with zipfile.ZipFile(zip_path) as zf:
+            members = zf.namelist()
+            for i, member in enumerate(members):
+                if self._cancel_event.is_set():
+                    raise InterruptedError('دانلود توسط کاربر لغو شد')
+                target = os.path.abspath(os.path.join(dest_abs, member))
+                if not target.startswith(dest_abs + os.sep) and target != dest_abs:
+                    raise ValueError(f'مسیر نامعتبر در فایل فشرده: {member}')
+                zf.extract(member, dest_abs)
+                if members:
+                    self._progress(lang, 90 + (i + 1) / len(members) * 10)
+
+    def delete(self, lang='fa'):
+        """حذف مدل برای آزاد کردن فضا."""
+        import shutil
+        info = self.models.get(lang)
+        if not info:
+            return False
+        path = os.path.join(self.models_dir, info['name'])
+        if os.path.isdir(path):
+            try:
+                shutil.rmtree(path)
+                self._status(f"مدل {info['label']} حذف شد.")
+                return True
+            except OSError as exc:
+                self._status(f'حذف ناموفق بود: {exc}')
+        return False

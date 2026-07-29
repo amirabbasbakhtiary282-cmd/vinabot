@@ -170,11 +170,38 @@ VINA_API int vina_llm_count_tokens(vina_llm_ctx* handle, const char* text) {
 // `cancel_flag` یک اشاره‌گر اختیاری به یک int است: اگر در حین تولید به مقدار
 // غیرصفر تغییر کند، تولید متوقف می‌شود (برای دکمه‌ی «لغو» در رابط کاربری).
 // بازگشت: تعداد بایت نوشته‌شده (>= 0) یا کد خطای منفی.
+// نسخه‌ی جریانی (streaming): هر قطعه‌ی متن تولیدشده بلافاصله از طریق
+// `token_cb` به سمت پایتون داده می‌شود تا رابط کاربری بتواند توکن‌به‌توکن
+// نمایش دهد و موتور TTS بتواند جمله‌به‌جمله شروع به خواندن کند (بدون
+// انتظار برای پایان کل پاسخ). اگر callback مقدار غیرصفر برگرداند، تولید
+// متوقف می‌شود (برای قطع کردن وسط صحبت / barge-in).
+typedef int (*vina_token_cb)(const char* piece, void* user_data);
+
+VINA_API int vina_llm_generate_stream(vina_llm_ctx* handle, const char* prompt,
+                                int max_tokens, float temperature, float top_p, int top_k,
+                                float repeat_penalty, const char* stop_str,
+                                char* out_buf, int out_size,
+                                volatile int* cancel_flag,
+                                vina_token_cb token_cb, void* user_data);
+
 VINA_API int vina_llm_generate(vina_llm_ctx* handle, const char* prompt,
                                 int max_tokens, float temperature, float top_p, int top_k,
                                 float repeat_penalty, const char* stop_str,
                                 char* out_buf, int out_size,
                                 volatile int* cancel_flag) {
+    // نسخه‌ی قدیمی و blocking صرفاً حالت خاصی از نسخه‌ی جریانی است
+    // (بدون callback) تا منطق تولید فقط در یک جا نگه‌داری شود.
+    return vina_llm_generate_stream(handle, prompt, max_tokens, temperature, top_p,
+                                     top_k, repeat_penalty, stop_str, out_buf,
+                                     out_size, cancel_flag, nullptr, nullptr);
+}
+
+VINA_API int vina_llm_generate_stream(vina_llm_ctx* handle, const char* prompt,
+                                int max_tokens, float temperature, float top_p, int top_k,
+                                float repeat_penalty, const char* stop_str,
+                                char* out_buf, int out_size,
+                                volatile int* cancel_flag,
+                                vina_token_cb token_cb, void* user_data) {
     if (!handle || !handle->ctx || !handle->vocab) return -1;
     if (!prompt) return -2;
 
@@ -233,8 +260,51 @@ VINA_API int vina_llm_generate(vina_llm_ctx* handle, const char* prompt,
     std::string stop_seq = stop_str ? stop_str : "";
     int generated = 0;
 
+    // ----------------------------------------------------------------
+    // مدیریت ارسال جریانی
+    // ----------------------------------------------------------------
+    // `emitted` تعداد بایت‌هایی از `result` است که قبلاً به callback داده شده.
+    // دو نکته‌ی مهم:
+    //  1) یک توکن llama.cpp ممکن است فقط بخشی از یک کاراکتر UTF-8 باشد
+    //     (خیلی رایج در فارسی/عربی). اگر آن بایت‌های ناقص را جداگانه به
+    //     پایتون بدهیم، decode خراب می‌شود. پس فقط تا آخرین مرز کامل
+    //     UTF-8 ارسال می‌کنیم.
+    //  2) اگر stop sequence داریم، باید انتهای رشته را به اندازه‌ی
+    //     (len(stop)-1) بایت نگه داریم تا اگر بخشی از stop بود، به‌اشتباه
+    //     به کاربر نمایش داده نشود.
+    size_t emitted = 0;
+    bool   cb_stop = false;
+
+    // آخرین ایندکسی که یک کاراکتر کامل UTF-8 در آن تمام می‌شود را برمی‌گرداند.
+    auto utf8_safe_end = [](const std::string& s, size_t limit) -> size_t {
+        size_t end = limit;
+        while (end > 0) {
+            unsigned char c = (unsigned char)s[end - 1];
+            if ((c & 0x80) == 0x00) return end;              // ASCII: مرز کامل
+            if ((c & 0xC0) == 0x80) { end--; continue; }     // بایت ادامه: عقب برو
+            // بایت شروع یک دنباله‌ی چندبایتی: بررسی کن آیا کامل است
+            size_t need = (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : 4;
+            return (limit - (end - 1)) >= need ? limit : end - 1;
+        }
+        return 0;
+    };
+
+    auto flush_stream = [&](bool final_flush) {
+        if (!token_cb || cb_stop) return;
+        size_t keep_back = final_flush || stop_seq.empty() ? 0 : stop_seq.size() - 1;
+        if (result.size() <= emitted + keep_back) return;
+        size_t limit = result.size() - keep_back;
+        size_t safe = final_flush ? limit : utf8_safe_end(result, limit);
+        if (safe <= emitted) return;
+        std::string chunk = result.substr(emitted, safe - emitted);
+        emitted = safe;
+        if (token_cb(chunk.c_str(), user_data) != 0) cb_stop = true;
+    };
+
     for (int i = 0; i < max_tokens; i++) {
-        if (cancel_flag && *cancel_flag) {
+        // توقف یا با پرچم لغو از بیرون (دکمه‌ی توقف / قطع کردن صحبت)، یا با
+        // درخواست خود callback.
+        if ((cancel_flag && *cancel_flag) || cb_stop) {
             break;
         }
 
@@ -258,9 +328,15 @@ VINA_API int vina_llm_generate(vina_llm_ctx* handle, const char* prompt,
         if (!stop_seq.empty() && result.size() >= stop_seq.size()) {
             if (result.compare(result.size() - stop_seq.size(), stop_seq.size(), stop_seq) == 0) {
                 result.resize(result.size() - stop_seq.size());
+                // چیزی که تا اینجا ارسال نشده و جزو stop نیست را بفرست
+                if (emitted > result.size()) emitted = result.size();
+                flush_stream(true);
                 break;
             }
         }
+
+        // ارسال قطعه‌ی جدید به سمت پایتون (نمایش زنده + شروع TTS)
+        flush_stream(false);
 
         // اگر context در حال پر شدن است، به‌جای کرش، تولید را متوقف کن.
         if (llama_kv_self_used_cells(ctx) >= handle->n_ctx - 4) {
@@ -272,6 +348,9 @@ VINA_API int vina_llm_generate(vina_llm_ctx* handle, const char* prompt,
             break;
         }
     }
+
+    // ارسال باقی‌مانده‌ی بافر (بخشی که به‌خاطر keep_back/مرز UTF-8 نگه داشته شده)
+    flush_stream(true);
 
     llama_sampler_free(smpl);
 

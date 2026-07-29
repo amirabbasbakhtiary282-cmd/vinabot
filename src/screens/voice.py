@@ -115,7 +115,7 @@ class VoiceScreen(MainTabScreen):
         )
 
         self.orb.is_active = app.is_listening
-        self.orb.is_thinking = app.is_speaking
+        self.orb.is_thinking = (app.voice_state == 'thinking') or app.is_speaking
         self.wave.is_active = app.is_listening or app.is_speaking
         self.mic_btn.is_recording = app.is_listening
 
@@ -126,6 +126,10 @@ class VoiceScreen(MainTabScreen):
         elif app.is_speaking:
             self.status_label.text = fix_rtl('در حال صحبت کردن...')
             self.status_card.status_text = fix_rtl('در حال پاسخ')
+            self._show_indicator(self.speaking_indicator, self.listening_indicator)
+        elif app.voice_state == 'thinking':
+            self.status_label.text = fix_rtl('در حال فکر کردن...')
+            self.status_card.status_text = fix_rtl('در حال پردازش')
             self._show_indicator(self.speaking_indicator, self.listening_indicator)
         else:
             self.status_label.text = fix_rtl('برای شروع، دکمه‌ی میکروفون را لمس کنید')
@@ -145,12 +149,31 @@ class VoiceScreen(MainTabScreen):
         self.speaking_indicator.stop()
 
     def _toggle_voice_mode(self):
+        """شروع/پایان گفتگوی صوتی زنده و پیوسته.
+
+        برخلاف نسخه‌ی قبلی (که هر بار فقط یک جمله می‌شنید)، اینجا یک جلسه‌ی
+        گفتگوی دوطرفه شروع می‌شود: وینا گوش می‌دهد، پاسخ می‌دهد، دوباره
+        گوش می‌دهد و کاربر می‌تواند وسط حرفش قطعش کند.
+        """
         app = App.get_running_app()
-        if app.is_listening:
+        conv = app.voice.conversation
+
+        if conv is not None and conv.is_running:
+            app.stop_voice_conversation()
+            self.transcript_label.text = fix_rtl('گفتگو پایان یافت')
             return
-        pulse(self.mic_btn, scale_prop='opacity', low=0.6, high=1.0, duration=0.35)
-        app.start_listening(on_transcript=self._on_transcript)
-        Clock.schedule_interval(self._poll_state, 0.2)
+
+        def _begin(granted=True):
+            if not granted:
+                self.transcript_label.text = fix_rtl(
+                    'برای گفتگوی صوتی، اجازه‌ی دسترسی به میکروفون لازم است')
+                return
+            pulse(self.mic_btn, scale_prop='opacity', low=0.6, high=1.0, duration=0.35)
+            if app.start_voice_conversation():
+                self.transcript_label.text = fix_rtl('گوش می‌دهم... صحبت کنید')
+                Clock.schedule_interval(self._poll_state, 0.2)
+
+        app.ensure_microphone_permission(_begin)
 
     def _on_transcript(self, text):
         self.transcript_label.text = fix_rtl(text)
@@ -158,7 +181,12 @@ class VoiceScreen(MainTabScreen):
     def _poll_state(self, dt):
         self._sync_state()
         app = App.get_running_app()
-        if not app.is_listening and not app.is_speaking:
+        # متن زنده (چه گفته‌ی کاربر، چه پاسخ در حال تولید وینا)
+        if app.live_transcript:
+            self.transcript_label.text = fix_rtl(app.live_transcript)
+
+        conv = app.voice.conversation
+        if conv is None or not conv.is_running:
             Animation.cancel_all(self.mic_btn)
             self.mic_btn.opacity = 1
             return False
