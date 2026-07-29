@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # فایل تنظیمات Buildozer برای ساخت APK وینا
-# این فایل را در پوشه اصلی پروژه قرار دهید
 
 [app]
 
@@ -9,7 +8,7 @@ title = Vina AI
 package.name = vinabot
 package.domain = org
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,ttf,json,db,gguf,so
+source.include_exts = py,png,jpg,jpeg,kv,atlas,ttf,otf,eot,woff,json,gguf,so
 version = 1.0.0
 
 # نام کامل برنامه
@@ -18,61 +17,68 @@ package.author = Vina Team
 package.author_email = vina@vinabot.org
 package.license = MIT
 
-# معماری هدف (ARM64 برای گوشی‌های جدید)
+# معماری هدف
 android.archs = arm64-v8a
 android.api = 33
 android.minapi = 24
 android.ndk = 28c
-# android.sdk_path = /home/amirabbas/.buildozer/android/platform/android-sdk
+android.ndk_api = 24
 
-# مجوزها
-android.permissions = INTERNET,RECORD_AUDIO,CAMERA,READ_EXTERNAL_STORAGE,WRITE_EXTERNAL_STORAGE,ACCESS_WIFI_STATE,ACCESS_NETWORK_STATE,WAKE_LOCK,VIBRATE,FOREGROUND_SERVICE,READ_CONTACTS,READ_CALENDAR,SET_ALARM,RECEIVE_BOOT_COMPLETED,MODIFY_AUDIO_SETTINGS
+# مجوزها (فقط مجوزهایی که واقعاً استفاده می‌شوند)
+# - INTERNET: جستجوی اینترنتی و دانلود مدل
+# - RECORD_AUDIO: تشخیص گفتار (STT)
+# - ACCESS_NETWORK_STATE: بررسی وضعیت اتصال قبل از جستجو
+# - VIBRATE: بازخورد لمسی
+# - WAKE_LOCK: جلوگیری از خواب رفتن گوشی حین صحبت TTS
+# - WRITE_SETTINGS: تنظیم روشنایی صفحه (کاربر باید صریحاً از تنظیمات اجازه دهد)
+# - POST_NOTIFICATIONS: نمایش یادآوری‌ها (الزامی از اندروید 13/API 33 به بعد)
+# توجه: CAMERA، READ/WRITE_EXTERNAL_STORAGE، READ_CONTACTS، READ_CALENDAR،
+# SET_ALARM، RECEIVE_BOOT_COMPLETED و MODIFY_AUDIO_SETTINGS از نسخه‌ی قبلی
+# حذف شدند چون هیچ کدی در این پروژه از آن‌ها استفاده نمی‌کرد (درخواست مجوز
+# بدون استفاده‌ی واقعی هم گمراه‌کننده است و هم اعتماد کاربر را کاهش می‌دهد).
+android.permissions = INTERNET,RECORD_AUDIO,ACCESS_NETWORK_STATE,VIBRATE,WAKE_LOCK,android.permission.WRITE_SETTINGS,android.permission.POST_NOTIFICATIONS
 
 # تنظیمات کامپایلر
 android.accept_sdk_license = True
 android.release_artifact = apk
 android.debug_artifact = apk
-
-# کتابخانه‌ها وابستگی‌ها
-# python3 = python3.11+
-# kivy = kivy 2.3.0+
-# python-for-android (p4a)
-
 android.enable_r8 = False
 
 # منابع (فایل‌های اضافی)
-source.include_patterns = assets/*,models/*.gguf,models/vosk*,memory/*
+source.include_patterns = assets/*,models/*.gguf
 
-# تنظیمات P4A - از نسخه پایدار استفاده کنید
+# تنظیمات P4A
 p4a.branch = master
 p4a.bootstrap = sdl2
+# recipeهای اختصاصی برای اجرای واقعی مدل زبانی روی اندروید (بدون
+# llama-cpp-python) - به‌جای آن مستقیماً سورس رسمی llama.cpp کراس‌کامپایل
+# می‌شود. جزئیات کامل در p4a-recipes/llamacpp و p4a-recipes/vinallm.
+p4a.local_recipes = ./p4a-recipes
 
-# فایل‌های Python اضافی
-# NOTE: llama-cpp-python و vosk نیاز به cross-compile دارند، حذف شدند.
-# کاربر می‌تواند Vosk model رو به صورت runtime دانلود کند.
-# مدل LLM (Gemma-2-9B) به دلیل حجم بالا (5GB) روی گوشی اجرا نمی‌شود.
-# برنامه با fallback text-mode و بدون صدا کار می‌کند.
-requirements = python3,kivy,openssl,requests,beautifulsoup4,numpy,sqlite3,cryptography,pillow,pyjnius
+# وابستگی‌ها:
+# - llamacpp, vinallm: موتور استنتاج مدل زبانی محلی (native، بدون llama-cpp-python)
+# - pyjnius: دسترسی به APIهای اندروید (TTS، SpeechRecognizer، تنظیمات سیستم)
+# - plyer: باتری و سایر سنسورهای استاندارد
+# - arabic_reshaper, python-bidi: نمایش صحیح متن فارسی/عربی (شکل‌دهی حروف و RTL)
+# - requests, beautifulsoup4: جستجوی اینترنتی
+# نکته: vosk حذف شده چون تشخیص گفتار اکنون از android.speech.SpeechRecognizer
+# داخلی استفاده می‌کند (بدون نیاز به دانلود مدل جداگانه)؛ llama-cpp-python هم
+# حذف شده چون کراس‌کامپایل آن برای اندروید غیرقابل‌اعتماد است.
+requirements = python3,kivy==2.3.1,openssl,requests,beautifulsoup4,sqlite3,pyjnius,plyer,arabic_reshaper,python-bidi==0.4.2,pygments,android,llamacpp,vinallm
 
-# تنظیمات Gradle
 android.gradle_dependencies =
-
-# فایل AndroidManifest.xml سفارشی (غیرفعال - buildozer خودش می‌سازد)
-# android.manifest = AndroidManifest.xml
 
 android.log_level = 2
 android.compile_sdk_version = 33
 android.build_tools_version = 33.0.2
-
-
-
-# ساخت release
-# buildozer -v android release
-
-# ساخت debug
-# buildozer -v android debug
-
-# اجرا روی گوشی
-# buildozer -v android debug deploy run
-
 android.gradle_version = 8.5
+
+orientation = portrait
+fullscreen = 0
+
+[buildozer]
+log_level = 2
+warn_on_root = 1
+
+# ساخت debug:  buildozer -v android debug
+# ساخت release: buildozer -v android release

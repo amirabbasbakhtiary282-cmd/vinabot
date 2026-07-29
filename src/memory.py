@@ -7,8 +7,13 @@
 import os
 import sqlite3
 import hashlib
+import hmac
+import binascii
 import json
 from datetime import datetime, timedelta
+
+
+PBKDF2_ITERATIONS = 200_000
 
 
 class VinaMemory:
@@ -112,6 +117,11 @@ class VinaMemory:
                 last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''')
 
+            cursor.execute('''CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )''')
+
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(username)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_conv_time ON conversations(timestamp)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_reminder_user ON reminders(username)')
@@ -121,13 +131,45 @@ class VinaMemory:
         except Exception as e:
             print(f"خطا در ایجاد دیتابیس: {e}")
 
-    def _hash_password(self, password):
-        """هش کردن رمز عبور"""
-        salt = "vina_ai_salt_2026"
-        return hashlib.sha256(f"{salt}{password}".encode()).hexdigest()
+    def _hash_password(self, password, salt=None):
+        """هش امن رمز عبور با PBKDF2-HMAC-SHA256 و نمک تصادفی اختصاصی هر کاربر.
+
+        نسخه‌ی قبلی از یک نمک ثابت و یکسان برای همه‌ی کاربران با یک دور
+        SHA-256 استفاده می‌کرد که در برابر حملات rainbow table و brute-force
+        بسیار ضعیف است. این نسخه از PBKDF2 با ۲۰۰٬۰۰۰ تکرار و نمک تصادفی
+        ۱۶ بایتی مخصوص هر کاربر استفاده می‌کند (هم‌راستا با توصیه‌های OWASP).
+        """
+        if salt is None:
+            salt = os.urandom(16)
+        derived = hashlib.pbkdf2_hmac(
+            'sha256', password.encode('utf-8'), salt, PBKDF2_ITERATIONS
+        )
+        return f"{binascii.hexlify(salt).decode()}${binascii.hexlify(derived).decode()}"
+
+    def _verify_password(self, password, stored_hash):
+        """بررسی رمز عبور در برابر هش ذخیره‌شده.
+
+        از هش‌های قدیمی (SHA-256 با نمک ثابت، بدون کاراکتر '$') نیز برای
+        سازگاری با کاربران موجود قبل از ارتقا پشتیبانی می‌شود.
+        """
+        if not stored_hash:
+            return False
+        if '$' not in stored_hash:
+            # سازگاری با فرمت قدیمی و ناامن (فقط برای مهاجرت داده‌های موجود)
+            legacy_salt = "vina_ai_salt_2026"
+            legacy_hash = hashlib.sha256(f"{legacy_salt}{password}".encode()).hexdigest()
+            return hmac.compare_digest(legacy_hash, stored_hash)
+        try:
+            salt_hex, hash_hex = stored_hash.split('$', 1)
+            salt = binascii.unhexlify(salt_hex)
+            expected = binascii.unhexlify(hash_hex)
+        except (ValueError, binascii.Error):
+            return False
+        derived = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, PBKDF2_ITERATIONS)
+        return hmac.compare_digest(derived, expected)
 
     def verify_user(self, username, password):
-        """بررسی اطلاعات ورود"""
+        """بررسی اطلاعات ورود؛ در صورت موفقیت با فرمت قدیمی، هش را به‌روزرسانی می‌کند"""
         try:
             cursor = self.conn.cursor()
             cursor.execute(
@@ -135,9 +177,23 @@ class VinaMemory:
                 (username,)
             )
             row = cursor.fetchone()
-            if row:
-                return row[0] == self._hash_password(password)
-            return False
+            if not row:
+                return False
+
+            stored_hash = row[0]
+            if not self._verify_password(password, stored_hash):
+                return False
+
+            if '$' not in stored_hash:
+                # ارتقای خودکار هش قدیمی و ناامن به فرمت جدید PBKDF2
+                new_hash = self._hash_password(password)
+                cursor.execute(
+                    "UPDATE users SET password_hash=? WHERE username=?",
+                    (new_hash, username)
+                )
+                self.conn.commit()
+
+            return True
         except Exception:
             return False
 
@@ -432,3 +488,159 @@ class VinaMemory:
             return stats
         except Exception:
             return {}
+
+    # ------------------------------------------------------------------
+    # تنظیمات سراسری برنامه (مستقل از کاربر) - مثلاً وضعیت مشاهده‌ی onboarding
+    # ------------------------------------------------------------------
+    def set_flag(self, key, value):
+        """ذخیره‌ی یک تنظیم سراسری برنامه (نه مختص یک کاربر خاص)"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)",
+                (key, value)
+            )
+            self.conn.commit()
+            return True
+        except Exception:
+            return False
+
+    def get_flag(self, key, default=None):
+        """خواندن یک تنظیم سراسری برنامه"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT value FROM app_settings WHERE key=?", (key,))
+            row = cursor.fetchone()
+            return row[0] if row else default
+        except Exception:
+            return default
+
+    # ------------------------------------------------------------------
+    # مدیریت حافظه (برای صفحه‌ی «تنظیمات > حافظه») - مشاهده، پاک‌سازی،
+    # خروجی‌گیری (export) و وارد کردن (import) داده‌های کاربر
+    # ------------------------------------------------------------------
+    def get_memory_summary(self):
+        """خلاصه‌ی وضعیت حافظه برای نمایش در صفحه‌ی تنظیمات"""
+        stats = self.get_stats()
+        return {
+            'conversations_count': stats.get('conversations', 0),
+            'notes_count': stats.get('notes', 0),
+            'reminders_count': stats.get('reminders', 0),
+            'preferences_count': stats.get('preferences', 0),
+            'db_size_kb': self._get_db_size_kb(),
+        }
+
+    def _get_db_size_kb(self):
+        try:
+            return round(os.path.getsize(self.db_path) / 1024, 1)
+        except OSError:
+            return 0
+
+    def clear_conversation_history(self, username=None):
+        """پاک کردن تاریخچه‌ی مکالمات یک کاربر (یا کاربر فعلی)"""
+        target_user = username or self.current_user or 'guest'
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("DELETE FROM conversations WHERE username=?", (target_user,))
+            self.conn.commit()
+            return True
+        except Exception:
+            return False
+
+    def clear_all_memory(self, username=None):
+        """پاک کردن کامل حافظه‌ی یک کاربر: مکالمات، یادداشت‌ها، یادآوری‌ها،
+        اطلاعات شخصی و ترجیحات (برای «پاک کردن کامل حافظه» در تنظیمات)"""
+        target_user = username or self.current_user or 'guest'
+        try:
+            cursor = self.conn.cursor()
+            for table in ('conversations', 'notes', 'reminders', 'user_info',
+                          'preferences', 'behavioral_patterns'):
+                cursor.execute(f"DELETE FROM {table} WHERE username=?", (target_user,))
+            self.conn.commit()
+            return True
+        except Exception:
+            return False
+
+    def export_memory(self, username=None):
+        """خروجی‌گیری از تمام داده‌های یک کاربر به‌صورت دیکشنری قابل تبدیل به JSON"""
+        target_user = username or self.current_user or 'guest'
+        try:
+            cursor = self.conn.cursor()
+            data = {'username': target_user, 'exported_at': datetime.now().isoformat()}
+
+            cursor.execute(
+                "SELECT role, message, timestamp FROM conversations WHERE username=? ORDER BY id",
+                (target_user,)
+            )
+            data['conversations'] = [
+                {'role': r[0], 'message': r[1], 'time': r[2]} for r in cursor.fetchall()
+            ]
+
+            cursor.execute(
+                "SELECT note, category, created_at FROM notes WHERE username=? ORDER BY id",
+                (target_user,)
+            )
+            data['notes'] = [
+                {'note': r[0], 'category': r[1], 'time': r[2]} for r in cursor.fetchall()
+            ]
+
+            cursor.execute(
+                "SELECT key, value FROM user_info WHERE username=?", (target_user,)
+            )
+            data['user_info'] = {r[0]: r[1] for r in cursor.fetchall()}
+
+            cursor.execute(
+                "SELECT key, value, confidence FROM preferences WHERE username=?", (target_user,)
+            )
+            data['preferences'] = [
+                {'key': r[0], 'value': r[1], 'confidence': r[2]} for r in cursor.fetchall()
+            ]
+
+            return data
+        except Exception as exc:
+            print(f"خطا در خروجی‌گیری از حافظه: {exc}")
+            return None
+
+    def export_memory_to_file(self, file_path, username=None):
+        """ذخیره‌ی خروجی حافظه در یک فایل JSON"""
+        data = self.export_memory(username)
+        if data is None:
+            return False
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except OSError as exc:
+            print(f"خطا در نوشتن فایل خروجی: {exc}")
+            return False
+
+    def import_memory_from_file(self, file_path, username=None):
+        """وارد کردن داده‌های حافظه از یک فایل JSON که قبلاً export شده"""
+        target_user = username or self.current_user or 'guest'
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"خطا در خواندن فایل ورودی: {exc}")
+            return False
+
+        try:
+            for conv in data.get('conversations', []):
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "INSERT INTO conversations (username, role, message) VALUES (?, ?, ?)",
+                    (target_user, conv.get('role', 'user'), conv.get('message', ''))
+                )
+            for note in data.get('notes', []):
+                self.save_note(note.get('note', ''), note.get('category', 'general'))
+            for key, value in data.get('user_info', {}).items():
+                self.remember(key, value)
+            for pref in data.get('preferences', []):
+                self.save_preference(
+                    pref.get('key', ''), pref.get('value', ''), pref.get('confidence', 1.0)
+                )
+            self.conn.commit()
+            return True
+        except Exception as exc:
+            print(f"خطا در وارد کردن حافظه: {exc}")
+            return False

@@ -4,9 +4,7 @@
 استفاده از DuckDuckGo بدون نیاز به API Key
 """
 
-import re
 import urllib.parse
-import json
 
 
 class VinaSearch:
@@ -81,7 +79,7 @@ class VinaSearch:
             return "خطا: زمان جستجو تمام شد. اتصال اینترنت را بررسی کنید."
         except requests.exceptions.ConnectionError:
             return "خطا: اتصال اینترنت برقرار نیست."
-        except Exception as e:
+        except Exception:
             return self._search_fallback(query)
 
     def _search_fallback(self, query):
