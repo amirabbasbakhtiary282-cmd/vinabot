@@ -26,9 +26,22 @@ from pythonforandroid.util import current_directory
 class LlamaCppRecipe(Recipe):
     # نسخه‌ی پین‌شده و تست‌شده (به‌جای master، برای بازتولیدپذیری بیلد)
     version = "b5026"
-    url = "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/refs/tags/{version}"
-    # نام پوشه‌ی استخراج‌شده از تاربال codeload با نام معمول release متفاوت است
-    # (llama.cpp-b5026) بنابراین به‌صورت صریح مشخص می‌کنیم.
+    # مهم: از آدرس /archive/refs/tags/{version}.tar.gz استفاده می‌شود، نه
+    # codeload.github.com/.../tar.gz/refs/tags/{version}.
+    #
+    # چرا؟ python-for-android نام فایل دانلودی را با basename گرفتن از خودِ
+    # URL می‌سازد (pythonforandroid/recipe.py: `filename = basename(
+    # versioned_url)`). آدرس codeload به فایلی بدون پسوند ختم می‌شود
+    # («b5026»)، و p4a هنگام استخراج فقط پسوندهای .zip/.tar.gz/.tar.bz2/
+    # .tar.xz را می‌شناسد، بنابراین بیلد با این خطا شکست می‌خورد:
+    #
+    #     Could not extract b5026 download, it must be .zip, .tar.gz or
+    #     .tar.bz2 or .tar.xz
+    #
+    # آدرس زیر به «b5026.tar.gz» ختم می‌شود، پس هم basename پسوند درست
+    # دارد و هم محتوای تاربال دقیقاً همان است. نام پوشه‌ی ریشه‌ی داخل
+    # آرشیو «llama.cpp-b5026» است که با get_build_dir زیر هم‌خوانی دارد.
+    url = "https://github.com/ggml-org/llama.cpp/archive/refs/tags/{version}.tar.gz"
 
     depends = []
     built_libraries = {
