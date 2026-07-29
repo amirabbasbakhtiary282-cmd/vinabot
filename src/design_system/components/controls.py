@@ -21,7 +21,7 @@ from src.design_system.base import ThemedWidgetMixin, theme
 
 
 class ModernSwitch(Widget, ThemedWidgetMixin):
-    """سوییچ روشن/خاموش با انیمیشن نرم لغزش دایره"""
+    """سوییچ روشن/خاموش با انیمیشن نرم لغزش دایره (همان AnimatedSwitch در تنظیمات)"""
 
     active = BooleanProperty(False)
 
@@ -269,3 +269,8 @@ class SegmentedControl(BoxLayout, ThemedWidgetMixin):
             btn._seg_color.rgba = theme.accent if is_sel else (0, 0, 0, 0)
             btn.color = theme.text_on_accent if is_sel else theme.text_secondary
             btn.bold = is_sel
+
+
+# نام مستعار: طبق مستندات سیستم طراحی، سوییچ انیمیشنی «AnimatedSwitch» نامیده
+# می‌شود؛ پیاده‌سازی واقعی همان ModernSwitch است (بدون تکرار کد).
+AnimatedSwitch = ModernSwitch

@@ -14,8 +14,8 @@ from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 
 from src.design_system import (
-    theme, AiOrb, ParticleSystem, GlassCard, FeatureCard, ModelCard,
-    StatisticsCard, ConversationCard, EmptyState, PageHeader,
+    theme, AiOrb, ParticleSystem, WelcomeCard, QuickActionCard, ModelStatusCard,
+    MemoryStatusCard, StorageStatusCard, RecentConversationCard, EmptyState, PageHeader,
 )
 from src.design_system.animations import stagger, slide_in_up
 from src.screens.base import MainTabScreen
@@ -66,7 +66,7 @@ class HomeScreen(MainTabScreen):
 
     def _build_welcome_card(self):
         app = App.get_running_app()
-        card = GlassCard(
+        card = WelcomeCard(
             orientation='horizontal', size_hint_y=None, height=dp(90),
             padding=[dp(18), dp(14), dp(18), dp(14)], spacing=dp(14), radius=theme.radius_lg,
         )
@@ -92,7 +92,7 @@ class HomeScreen(MainTabScreen):
     def _build_model_card(self):
         app = App.get_running_app()
         info = app.brain.get_model_info()
-        self._model_card = ModelCard(
+        self._model_card = ModelStatusCard(
             model_name=fix_rtl(info['model_name']) if info['model_name'] else fix_rtl('مدلی بارگذاری نشده'),
             status_text=fix_rtl(app.model_status),
             is_ready=info['loaded'],
@@ -103,14 +103,14 @@ class HomeScreen(MainTabScreen):
         app = App.get_running_app()
         summary = app.memory.get_memory_summary()
         row = GridLayout(cols=3, size_hint_y=None, height=dp(96), spacing=dp(10))
-        self._stat_conversations = StatisticsCard(
+        self._stat_conversations = MemoryStatusCard(
             icon='💬', value_text=str(summary['conversations_count']),
             label_text=fix_rtl('مکالمه'),
         )
-        self._stat_notes = StatisticsCard(
+        self._stat_notes = MemoryStatusCard(
             icon='📝', value_text=str(summary['notes_count']), label_text=fix_rtl('یادداشت'),
         )
-        self._stat_storage = StatisticsCard(
+        self._stat_storage = StorageStatusCard(
             icon='💾', value_text=f"{summary['db_size_kb']:.0f}KB", label_text=fix_rtl('حافظه'),
         )
         row.add_widget(self._stat_conversations)
@@ -131,11 +131,11 @@ class HomeScreen(MainTabScreen):
         app = App.get_running_app()
 
         cards = [
-            FeatureCard(icon='➕', label_text=fix_rtl('چت جدید'),
+            QuickActionCard(icon='➕', label_text=fix_rtl('چت جدید'),
                         on_release=lambda: app.switch_tab('chat')),
-            FeatureCard(icon='🎙', label_text=fix_rtl('حالت صوتی'),
+            QuickActionCard(icon='🎙', label_text=fix_rtl('حالت صوتی'),
                         on_release=lambda: app.switch_tab('voice')),
-            FeatureCard(icon='⚙', label_text=fix_rtl('تنظیمات'),
+            QuickActionCard(icon='⚙', label_text=fix_rtl('تنظیمات'),
                         on_release=lambda: app.switch_tab('settings')),
         ]
         for card in cards:
@@ -173,7 +173,7 @@ class HomeScreen(MainTabScreen):
         user_messages = [m for m in recent if m['role'] == 'user']
         for msg in reversed(user_messages[-5:]):
             preview = msg['message'][:40] + ('…' if len(msg['message']) > 40 else '')
-            card = ConversationCard(
+            card = RecentConversationCard(
                 title_text=fix_rtl(preview[:20] or 'مکالمه'),
                 preview_text=fix_rtl(preview),
                 time_text=msg['time'][-5:] if msg.get('time') else '',

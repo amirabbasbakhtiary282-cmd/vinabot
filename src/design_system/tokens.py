@@ -26,6 +26,21 @@ class _LazyDp:
         return dp(self._value)
 
 
+class _ThemeProxyDp:
+    """توصیف‌گر تنبل که در لحظه‌ی دسترسی، مقدار متناظر را از ``theme`` (بر حسب dp)
+    می‌خواند. برای مقادیری استفاده می‌شود که در آینده ممکن است کاربر از طریق
+    تنظیمات مقیاس‌شان را تغییر دهد (مثل فاصله‌گذاری‌ها) ولی الان روی ``theme``
+    به‌صورت عدد خام (نه dp) ذخیره شده‌اند."""
+
+    def __init__(self, theme_attr):
+        self._attr = theme_attr
+
+    def __get__(self, obj, objtype=None):
+        from kivy.metrics import dp
+        from src.theme import theme
+        return dp(getattr(theme, self._attr))
+
+
 class IconSize:
     """اندازه‌ی استاندارد آیکون‌ها (بر حسب dp) - محاسبه‌ی تنبل"""
     XS = _LazyDp(14)
@@ -59,3 +74,26 @@ class ScreenLayout:
     SECTION_SPACING = _LazyDp(20)
     CARD_SPACING = _LazyDp(12)
     MAX_CONTENT_WIDTH = _LazyDp(480)
+
+
+class Spacing:
+    """فاصله‌گذاری استاندارد سراسری (Small/Medium/Large + XS/XL) - همیشه از
+    ``theme`` خوانده می‌شود تا اگر در آینده کاربر مقیاس فاصله‌گذاری را از
+    تنظیمات تغییر دهد، همه‌جا هماهنگ باقی بماند. **هیچ فایلی نباید عدد
+    فاصله‌گذاری را مستقیم بنویسد؛ همیشه از اینجا (یا از ``theme.space_*``)
+    استفاده شود.**
+    """
+    XS = _ThemeProxyDp('space_xs')
+    SM = _ThemeProxyDp('space_sm')
+    MD = _ThemeProxyDp('space_md')
+    LG = _ThemeProxyDp('space_lg')
+    XL = _ThemeProxyDp('space_xl')
+
+
+class Radius:
+    """شعاع گردی گوشه‌ها - سطح‌های استاندارد (کوچک/متوسط/بزرگ/کارت/دکمه‌ی گرد)"""
+    SM = _ThemeProxyDp('radius_sm')
+    MD = _ThemeProxyDp('radius_md')
+    LG = _ThemeProxyDp('radius_lg')
+    CARD = _ThemeProxyDp('radius_lg')
+    PILL = _ThemeProxyDp('radius_pill')

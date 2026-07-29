@@ -19,7 +19,7 @@ from kivy.factory import Factory
 
 from src.theme import theme, THEMES, THEME_LABELS
 from src.design_system.base import ThemedWidgetMixin, rgba_to_hex
-from src.design_system.tokens import IconSize, ButtonHeight, Elevation, ScreenLayout
+from src.design_system.tokens import IconSize, ButtonHeight, Elevation, ScreenLayout, Spacing, Radius
 from src.design_system.typography import (
     TypeStyle, TYPE_LARGE_TITLE, TYPE_TITLE, TYPE_SECTION_TITLE,
     TYPE_BODY, TYPE_BODY_STRONG, TYPE_CAPTION, TYPE_BUTTON, TYPE_CODE, font_name,
@@ -33,6 +33,7 @@ from src.design_system.components.buttons import (
 )
 from src.design_system.components.cards import (
     GlassCard, SettingsCard, FeatureCard, ModelCard, StatisticsCard, MemoryCard,
+    WelcomeCard, QuickActionCard, ModelStatusCard, MemoryStatusCard, StorageStatusCard,
 )
 from src.design_system.components.inputs import (
     ModernTextField, SearchField, PasswordField, ChatInput,
@@ -45,14 +46,18 @@ from src.design_system.components.feedback import (
 )
 from src.design_system.components.loaders import LoadingSpinner, AiOrb, ParticleSystem
 from src.design_system.components.controls import (
-    ModernSwitch, ModernSlider, Dropdown, SegmentedControl,
+    ModernSwitch, AnimatedSwitch, ModernSlider, Dropdown, SegmentedControl,
 )
 from src.design_system.components.chat import (
-    Avatar, CodeBlock, ChatBubble, TypingIndicator, ThinkingAnimation,
-    MessageActions, ConversationCard,
+    Avatar, CodeBlock, ChatBubble, TypingIndicator, ThinkingAnimation, StreamingText,
+    MessageActions, ConversationCard, RecentConversationCard, PinnedChatCard,
 )
 from src.design_system.components.navigation import (
     PageHeader, ModernBottomNavigation, TabButton,
+)
+from src.design_system.components.voice import (
+    AnimatedMicrophone, VoiceWaveform, ListeningIndicator, SpeakingIndicator,
+    VoiceStatusCard, AIAvatar,
 )
 
 # نگه‌داری سازگاری با کد قدیمی: SoundWaveWidget قبلاً در src/ui.py بود
@@ -132,14 +137,17 @@ _ALL_WIDGETS = (
     AnimatedButton, PrimaryButton, SecondaryButton, DangerButton,
     IconButton, FloatingActionButton,
     GlassCard, SettingsCard, FeatureCard, ModelCard, StatisticsCard, MemoryCard,
+    WelcomeCard, QuickActionCard, ModelStatusCard, MemoryStatusCard, StorageStatusCard,
     ModernTextField, SearchField, PasswordField, ChatInput,
     ModernDialog, ConfirmationDialog, BottomSheet, ActionSheet, ActionSheetItem,
     Snackbar, Toast, LoadingOverlay, EmptyState, ErrorState, SuccessState,
     LoadingSpinner, AiOrb, ParticleSystem,
     ModernSwitch, ModernSlider, Dropdown, SegmentedControl,
-    Avatar, CodeBlock, ChatBubble, TypingIndicator, MessageActions, ConversationCard,
+    Avatar, CodeBlock, ChatBubble, TypingIndicator, StreamingText,
+    MessageActions, ConversationCard, RecentConversationCard, PinnedChatCard,
     PageHeader, ModernBottomNavigation, TabButton,
     SoundWaveWidget,
+    AnimatedMicrophone, ListeningIndicator, SpeakingIndicator, VoiceStatusCard,
 )
 
 for _widget_cls in _ALL_WIDGETS:
@@ -148,20 +156,23 @@ for _widget_cls in _ALL_WIDGETS:
 
 __all__ = [
     'theme', 'THEMES', 'THEME_LABELS', 'ThemedWidgetMixin', 'rgba_to_hex',
-    'IconSize', 'ButtonHeight', 'Elevation', 'ScreenLayout',
+    'IconSize', 'ButtonHeight', 'Elevation', 'ScreenLayout', 'Spacing', 'Radius',
     'TypeStyle', 'TYPE_LARGE_TITLE', 'TYPE_TITLE', 'TYPE_SECTION_TITLE',
     'TYPE_BODY', 'TYPE_BODY_STRONG', 'TYPE_CAPTION', 'TYPE_BUTTON', 'TYPE_CODE', 'font_name',
     'animations',
     'AnimatedButton', 'PrimaryButton', 'SecondaryButton', 'DangerButton',
     'IconButton', 'FloatingActionButton',
     'GlassCard', 'SettingsCard', 'FeatureCard', 'ModelCard', 'StatisticsCard', 'MemoryCard',
+    'WelcomeCard', 'QuickActionCard', 'ModelStatusCard', 'MemoryStatusCard', 'StorageStatusCard',
     'ModernTextField', 'SearchField', 'PasswordField', 'ChatInput',
     'ModernDialog', 'ConfirmationDialog', 'BottomSheet', 'ActionSheet', 'ActionSheetItem',
     'Snackbar', 'Toast', 'LoadingOverlay', 'EmptyState', 'ErrorState', 'SuccessState',
     'LoadingSpinner', 'AiOrb', 'ParticleSystem',
-    'ModernSwitch', 'ModernSlider', 'Dropdown', 'SegmentedControl',
-    'Avatar', 'CodeBlock', 'ChatBubble', 'TypingIndicator', 'ThinkingAnimation',
-    'MessageActions', 'ConversationCard',
+    'ModernSwitch', 'AnimatedSwitch', 'ModernSlider', 'Dropdown', 'SegmentedControl',
+    'Avatar', 'CodeBlock', 'ChatBubble', 'TypingIndicator', 'ThinkingAnimation', 'StreamingText',
+    'MessageActions', 'ConversationCard', 'RecentConversationCard', 'PinnedChatCard',
     'PageHeader', 'ModernBottomNavigation', 'TabButton',
     'SoundWaveWidget',
+    'AnimatedMicrophone', 'VoiceWaveform', 'ListeningIndicator', 'SpeakingIndicator',
+    'VoiceStatusCard', 'AIAvatar',
 ]

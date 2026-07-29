@@ -2,8 +2,9 @@
 """
 صفحه‌ی حالت صوتی (Voice Mode) - تجربه‌ی گفت‌وگوی صوتی تمام‌صفحه
 
-شامل: ارب بزرگ متحرک هوش مصنوعی، نشانگر موج صدا، دکمه‌ی میکروفون بزرگ با
-انیمیشن پالس، نمایش متن تشخیص داده‌شده و پاسخ فعلی.
+شامل: ارب بزرگ متحرک هوش مصنوعی (AIAvatar)، موج صدای اختصاصی
+(VoiceWaveform)، میکروفون انیمیشنی با حلقه‌های پالسی (AnimatedMicrophone)،
+نشانگرهای وضعیت گوش‌دادن/صحبت‌کردن و کارت وضعیت صوتی.
 """
 
 from kivy.animation import Animation
@@ -13,8 +14,11 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 
-from src.design_system import theme, AiOrb, SoundWaveWidget, PageHeader
-from src.design_system.components.buttons import IconButton
+from src.design_system import theme, PageHeader
+from src.design_system.components.voice import (
+    AnimatedMicrophone, VoiceWaveform, ListeningIndicator, SpeakingIndicator,
+    VoiceStatusCard, AIAvatar,
+)
 from src.design_system.animations import pulse
 from src.screens.base import MainTabScreen
 from src.text_utils import fix_rtl
@@ -35,43 +39,62 @@ class VoiceScreen(MainTabScreen):
         header = PageHeader(title_text=fix_rtl('حالت صوتی'))
         container.add_widget(header)
 
-        body = BoxLayout(orientation='vertical', padding=[dp(24), dp(20), dp(24), dp(30)],
-                          spacing=dp(20))
+        body = BoxLayout(orientation='vertical', padding=[dp(24), dp(16), dp(24), dp(24)],
+                          spacing=dp(14))
 
-        body.add_widget(BoxLayout(size_hint_y=0.08))
+        self.status_card = VoiceStatusCard(
+            status_text=fix_rtl('آماده'),
+            model_text='', language_text=fix_rtl('فارسی'),
+            size_hint_y=None, height=dp(72),
+        )
+        body.add_widget(self.status_card)
 
-        self.orb = AiOrb(size_hint=(None, None), size=(dp(180), dp(180)),
-                          pos_hint={'center_x': 0.5})
-        orb_wrap = BoxLayout(size_hint_y=0.35)
+        self.orb = AIAvatar(size_hint=(None, None), size=(dp(170), dp(170)),
+                             pos_hint={'center_x': 0.5})
+        orb_wrap = BoxLayout(size_hint_y=0.33)
         orb_wrap.add_widget(self.orb)
         body.add_widget(orb_wrap)
 
+        indicator_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(26),
+                                   spacing=dp(8))
+        indicator_row.add_widget(BoxLayout())
+        self.listening_indicator = ListeningIndicator()
+        self.listening_indicator.set_text(fix_rtl('در حال گوش دادن'))
+        indicator_row.add_widget(self.listening_indicator)
+        self.speaking_indicator = SpeakingIndicator()
+        self.speaking_indicator.set_text(fix_rtl('در حال صحبت کردن'))
+        self.speaking_indicator.opacity = 0
+        indicator_row.add_widget(self.speaking_indicator)
+        indicator_row.add_widget(BoxLayout())
+        body.add_widget(indicator_row)
+
         self.status_label = Label(
             text=fix_rtl('برای شروع، دکمه‌ی میکروفون را لمس کنید'),
-            font_name=theme.font_name, font_size='14sp', color=theme.text_secondary,
-            size_hint_y=0.08,
+            font_name=theme.font_name, font_size='13.5sp', color=theme.text_secondary,
+            size_hint_y=None, height=dp(24),
         )
         body.add_widget(self.status_label)
 
         self.transcript_label = Label(
             text='', font_name=theme.font_name, font_size='15sp', bold=True,
             color=theme.text_primary, halign='center', valign='middle',
-            size_hint_y=0.16,
+            size_hint_y=None, height=dp(70),
         )
         self.transcript_label.bind(size=lambda inst, *a: setattr(inst, 'text_size', inst.size))
         body.add_widget(self.transcript_label)
 
-        self.wave = SoundWaveWidget(size_hint_y=0.1)
+        self.wave = VoiceWaveform(size_hint_y=None, height=dp(50))
         body.add_widget(self.wave)
 
-        body.add_widget(BoxLayout(size_hint_y=0.05))
+        body.add_widget(BoxLayout(size_hint_y=None, height=dp(8)))
 
-        mic_wrap = BoxLayout(size_hint_y=0.18)
-        self.mic_btn = IconButton(text='🎤', font_size='34sp', size_hint=(None, None),
-                                   size=(dp(84), dp(84)), pos_hint={'center_x': 0.5})
+        mic_wrap = BoxLayout(size_hint_y=None, height=dp(100))
+        self.mic_btn = AnimatedMicrophone(pos_hint={'center_x': 0.5})
         self.mic_btn.bind(on_release=lambda *a: self._toggle_voice_mode())
         mic_wrap.add_widget(self.mic_btn)
         body.add_widget(mic_wrap)
+
+        body.add_widget(BoxLayout())
 
         container.add_widget(body)
 
@@ -86,16 +109,40 @@ class VoiceScreen(MainTabScreen):
 
     def _sync_state(self):
         app = App.get_running_app()
+        info = app.brain.get_model_info()
+        self.status_card.model_text = (
+            fix_rtl(info['model_name']) if info['model_name'] else fix_rtl('بدون مدل')
+        )
+
         self.orb.is_active = app.is_listening
         self.orb.is_thinking = app.is_speaking
         self.wave.is_active = app.is_listening or app.is_speaking
+        self.mic_btn.is_recording = app.is_listening
 
         if app.is_listening:
             self.status_label.text = fix_rtl('در حال گوش دادن...')
+            self.status_card.status_text = fix_rtl('گوش می‌دهم')
+            self._show_indicator(self.listening_indicator, self.speaking_indicator)
         elif app.is_speaking:
             self.status_label.text = fix_rtl('در حال صحبت کردن...')
+            self.status_card.status_text = fix_rtl('در حال پاسخ')
+            self._show_indicator(self.speaking_indicator, self.listening_indicator)
         else:
             self.status_label.text = fix_rtl('برای شروع، دکمه‌ی میکروفون را لمس کنید')
+            self.status_card.status_text = fix_rtl('آماده')
+            self._hide_all_indicators()
+
+    def _show_indicator(self, active_indicator, other_indicator):
+        active_indicator.opacity = 1
+        active_indicator.start()
+        other_indicator.opacity = 0
+        other_indicator.stop()
+
+    def _hide_all_indicators(self):
+        self.listening_indicator.opacity = 0
+        self.listening_indicator.stop()
+        self.speaking_indicator.opacity = 0
+        self.speaking_indicator.stop()
 
     def _toggle_voice_mode(self):
         app = App.get_running_app()

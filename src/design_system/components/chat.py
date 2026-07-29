@@ -252,6 +252,49 @@ class TypingIndicator(BoxLayout, ThemedWidgetMixin):
 ThinkingAnimation = TypingIndicator
 
 
+class StreamingText(Label, ThemedWidgetMixin):
+    """لیبل ساده برای نمایش متن استریم‌شونده (token-by-token) بدون کدبلاک/آواتار.
+
+    برخلاف ``ChatBubble.start_typing_animation`` (که برای شبیه‌سازی محلی
+    تایپ استفاده می‌شود)، این کامپوننت برای اتصال مستقیم به یک منبع واقعی
+    استریم (مثلاً خروجی تدریجی موتور LLM) طراحی شده: هر بار که توکن جدیدی
+    می‌رسد، فقط کافی است ``append_token`` صدا زده شود.
+    """
+
+    full_text = StringProperty('')
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault('font_name', theme.font_name)
+        kwargs.setdefault('font_size', '14.5sp')
+        kwargs.setdefault('color', theme.text_primary)
+        kwargs.setdefault('halign', 'right')
+        kwargs.setdefault('valign', 'top')
+        kwargs.setdefault('markup', True)
+        kwargs.setdefault('size_hint_y', None)
+        super().__init__(**kwargs)
+        self.bind(width=lambda inst, *a: setattr(inst, 'text_size', (inst.width, None)))
+        self.bind(texture_size=lambda inst, val: setattr(inst, 'height', val[1]))
+        self.bind_theme()
+
+    def on_theme_changed(self):
+        self.font_name = theme.font_name
+        self.color = theme.text_primary
+
+    def append_token(self, token):
+        """افزودن یک توکن/قطعه‌ی جدید از متن استریم‌شونده به انتهای متن فعلی"""
+        self.full_text += token
+        self.text = markdown_text_to_kivy_markup(self.full_text)
+
+    def set_full_text(self, text):
+        """جایگزینی کامل متن (مثلاً پس از پایان استریم، برای اعمال نهایی Markdown)"""
+        self.full_text = text
+        self.text = markdown_text_to_kivy_markup(text)
+
+    def reset(self):
+        self.full_text = ''
+        self.text = ''
+
+
 class ChatBubble(BoxLayout, ThemedWidgetMixin):
     """حباب چت با پشتیبانی از Markdown، بلوک کد، انیمیشن ظاهر شدن و دکمه‌های عملیات"""
 
@@ -505,3 +548,16 @@ class ConversationCard(GlassCard):
         self._title_label.color = theme.text_primary
         self._preview_label.color = theme.text_secondary
         self._time_label.color = theme.text_disabled
+
+
+class RecentConversationCard(ConversationCard):
+    """کارت یک مکالمه‌ی اخیر در لیست صفحه‌ی خانه (نام مستعار روی ConversationCard)"""
+    pass
+
+
+class PinnedChatCard(ConversationCard):
+    """کارت یک مکالمه‌ی سنجاق‌شده (Pinned)؛ پیش‌فرض ``is_pinned=True``"""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault('is_pinned', True)
+        super().__init__(**kwargs)

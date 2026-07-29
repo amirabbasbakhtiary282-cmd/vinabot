@@ -39,21 +39,88 @@ def _show_toast(text):
 
 
 # ==========================================================================
-# ظاهر برنامه (Appearance)
+# عمومی (General)
+# ==========================================================================
+def build_general(container):
+    container.add_widget(_section_label('زبان و جهت متن'))
+    container.add_widget(SettingsCard(
+        icon='🌐', title_text=fix_rtl('زبان برنامه'),
+        description_text=fix_rtl('زبان رابط کاربری وینا'),
+        value_text=fix_rtl('فارسی'),
+    ))
+    container.add_widget(SettingsCard(
+        icon='↔', title_text=fix_rtl('جهت متن (RTL/LTR)'),
+        description_text=fix_rtl('راست‌به‌چپ برای فارسی/عربی، چپ‌به‌راست برای انگلیسی'),
+        value_text=fix_rtl('راست‌به‌چپ'),
+    ))
+
+    container.add_widget(_section_label('پیروی از تنظیمات سیستم'))
+    container.add_widget(SettingsCard(
+        icon='📱', title_text=fix_rtl('پیروی از تم سیستم‌عامل'),
+        description_text=fix_rtl('اگر فعال باشد، تم تیره/روشن به‌صورت خودکار از تنظیمات اندروید گرفته می‌شود'),
+        control=_make_switch(theme.follow_system, lambda v: setattr(theme, 'follow_system', v)),
+    ))
+
+    container.add_widget(_section_label('حساب کاربری'))
+    app = App.get_running_app()
+    container.add_widget(SettingsCard(
+        icon='👤', title_text=fix_rtl('کاربر فعلی'),
+        description_text=fix_rtl('نام کاربری وارد شده به وینا'),
+        value_text=app.current_user or fix_rtl('مهمان'),
+    ))
+
+
+# ==========================================================================
+# تم‌ها (Themes) - انتخاب سریع از میان تم‌های آماده (جدا از ظاهر/appearance)
+# ==========================================================================
+def build_themes(container):
+    container.add_widget(_section_label('تم‌های آماده'))
+
+    grid_row = None
+    for i, (key, label) in enumerate(THEME_LABELS.items()):
+        if i % 2 == 0:
+            grid_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(64), spacing=dp(8))
+            container.add_widget(grid_row)
+        grid_row.add_widget(_theme_choice_card(key, label))
+
+    container.add_widget(_section_label('رنگ اکسنت سفارشی'))
+    accent_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(56), spacing=dp(8))
+    for hex_color in ('#00E676', '#2979FF', '#B388FF', '#FF5252', '#FFAB40', '#18FFFF'):
+        accent_row.add_widget(_make_color_swatch(hex_color))
+    container.add_widget(accent_row)
+
+
+def _theme_choice_card(theme_key, label):
+    from src.design_system import GlassCard as _GlassCard
+    is_active = (theme.theme_name == theme_key)
+    palette = THEMES[theme_key]
+    card = _GlassCard(
+        orientation='horizontal', padding=[dp(10), dp(8), dp(10), dp(8)], spacing=dp(8),
+        radius=theme.radius_md,
+        border_color=(theme.accent if is_active else theme.glass_border),
+    )
+    from kivy.uix.widget import Widget as _Widget
+    from kivy.graphics import Color as _Color, Ellipse as _Ellipse
+    swatch = _Widget(size_hint_x=None, width=dp(22))
+    with swatch.canvas:
+        _Color(*palette.get('accent', theme.accent))
+        _Ellipse(pos=swatch.pos, size=(dp(18), dp(18)))
+    card.add_widget(swatch)
+    lbl = Label(text=fix_rtl(label), font_name=theme.font_name, font_size='12sp',
+                color=theme.text_primary, halign='right')
+    lbl.bind(size=lambda inst, *a: setattr(inst, 'text_size', inst.size))
+    card.add_widget(lbl)
+    card.bind(on_touch_up=lambda inst, touch: (
+        (theme.apply_palette(theme_key), _show_toast(f'تم به «{label}» تغییر کرد'))
+        if card.collide_point(*touch.pos) else None
+    ))
+    return card
+
+
+# ==========================================================================
+# ظاهر برنامه (Appearance) - جلوه‌های بصری، فونت، شفافیت (تم انتخاب از بخش «تم‌ها»)
 # ==========================================================================
 def build_appearance(container):
-    container.add_widget(_section_label('تم رنگی'))
-    theme_card = GlassCard(orientation='vertical', size_hint_y=None, height=dp(64),
-                            padding=[dp(16), dp(10), dp(16), dp(10)], radius=theme.radius_lg)
-    theme_dropdown = Dropdown(
-        options=[label for _key, label in [(k, THEME_LABELS[k]) for k in THEMES.keys()]],
-        selected=THEME_LABELS.get(theme.theme_name, ''),
-        on_select=lambda label: _apply_theme_by_label(label),
-        size_hint_y=None, height=dp(44),
-    )
-    theme_card.add_widget(theme_dropdown)
-    container.add_widget(theme_card)
-
     container.add_widget(_section_label('حالت آمولد (صرفه‌جویی باتری در صفحه‌ی OLED)'))
     amoled_card = SettingsCard(
         icon='⚫', title_text=fix_rtl('حالت آمولد خالص'),
@@ -80,13 +147,11 @@ def build_appearance(container):
         'شفافیت کارت‌ها', theme.transparency, 0.5, 1.0,
         lambda v: setattr(theme, 'transparency', v),
     ))
+    container.add_widget(_slider_card(
+        'میزان بلور شیشه‌ای', theme.blur_strength, 0.0, 1.0,
+        lambda v: setattr(theme, 'blur_strength', v),
+    ))
 
-    container.add_widget(_section_label('سفارشی‌سازی رنگ اکسنت'))
-    accent_row = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(56), spacing=dp(8))
-    for hex_color in ('#00E676', '#2979FF', '#B388FF', '#FF5252', '#FFAB40', '#18FFFF'):
-        swatch = _make_color_swatch(hex_color)
-        accent_row.add_widget(swatch)
-    container.add_widget(accent_row)
 
 
 def _make_color_swatch(hex_color):
@@ -96,14 +161,6 @@ def _make_color_swatch(hex_color):
                  background_color=get_color_from_hex(hex_color))
     btn.bind(on_release=lambda *a: (theme.set_custom_accent(hex_color), _show_toast('رنگ اکسنت تغییر کرد')))
     return btn
-
-
-def _apply_theme_by_label(label):
-    for key, lbl in THEME_LABELS.items():
-        if lbl == label:
-            theme.apply_palette(key)
-            _show_toast(f'تم به «{label}» تغییر کرد')
-            return
 
 
 def _toggle_amoled(enabled):
@@ -181,7 +238,6 @@ def build_ai_model(container):
     model_names = [os.path.basename(m) for m in models] or [fix_rtl('هیچ مدلی نصب نیست')]
     model_dropdown_card = GlassCard(orientation='vertical', size_hint_y=None, height=dp(60),
                                      padding=[dp(16), dp(8), dp(16), dp(8)], radius=theme.radius_lg)
-    from src.design_system import Dropdown
     model_dropdown = Dropdown(
         options=model_names, selected=os.path.basename(info['model_path']) if info['model_path'] else '',
         on_select=lambda name: _load_selected_model(brain, models, name),
@@ -399,6 +455,47 @@ def build_storage(container):
 
 
 # ==========================================================================
+# کارایی (Performance)
+# ==========================================================================
+def build_performance(container):
+    app = App.get_running_app()
+    brain = app.brain
+    info = brain.get_model_info()
+
+    container.add_widget(_section_label('عملکرد موتور هوش مصنوعی'))
+    perf_card = GlassCard(orientation='vertical', size_hint_y=None, height=dp(70),
+                           padding=[dp(16), dp(10), dp(16), dp(10)], radius=theme.radius_lg)
+    perf_label = Label(
+        text=f"{fix_rtl('سرعت تولید پاسخ')}: {info['tokens_per_sec']} token/s",
+        font_name=theme.font_name, font_size='12sp', color=theme.text_secondary,
+        halign='right', valign='middle',
+    )
+    perf_label.bind(size=lambda inst, *a: setattr(inst, 'text_size', (inst.width, None)))
+    perf_card.add_widget(perf_label)
+    container.add_widget(perf_card)
+
+    container.add_widget(_section_label('منابع پردازشی'))
+    import os as _os
+    cpu_count = _os.cpu_count() or 4
+    container.add_widget(_slider_card(
+        f'تعداد threadهای پردازش (حداکثر {cpu_count})', brain.n_threads, 1, cpu_count,
+        lambda v: setattr(brain, 'n_threads', int(v)),
+    ))
+    container.add_widget(_slider_card(
+        'ظرفیت حافظه‌ی context مدل', brain.n_ctx, 512, 4096,
+        lambda v: setattr(brain, 'n_ctx', int(v)),
+    ))
+
+    container.add_widget(_section_label('سرعت و روانی انیمیشن‌ها'))
+    container.add_widget(SettingsCard(
+        icon='🎞', title_text=fix_rtl('کاهش انیمیشن‌ها'),
+        description_text=fix_rtl('برای گوشی‌های ضعیف‌تر، انیمیشن‌ها را ساده‌تر کن'),
+        control=_make_switch(theme.animation_speed_scale < 0.7,
+                              lambda v: setattr(theme, 'animation_speed_scale', 0.5 if v else 1.0)),
+    ))
+
+
+# ==========================================================================
 # حریم خصوصی (Privacy)
 # ==========================================================================
 def build_privacy(container):
@@ -451,6 +548,56 @@ def build_notifications(container):
 
 
 # ==========================================================================
+# گزینه‌های توسعه‌دهنده (Developer Options)
+# ==========================================================================
+def build_developer(container):
+    from src.android_bridge import is_android
+    import sys as _sys
+
+    app = App.get_running_app()
+    brain = app.brain
+    info = brain.get_model_info()
+
+    container.add_widget(_section_label('اطلاعات فنی'))
+    debug_card = GlassCard(orientation='vertical', size_hint_y=None, height=dp(140),
+                            padding=[dp(16), dp(12), dp(16), dp(12)], spacing=dp(4),
+                            radius=theme.radius_lg)
+    for text in (
+        f"{fix_rtl('پلتفرم')}: {'Android' if is_android() else fix_rtl('دسکتاپ (توسعه)')}",
+        f"Python: {_sys.version.split()[0]}",
+        f"{fix_rtl('مسیر مدل فعال')}: {info['model_path'] or fix_rtl('ندارد')}",
+        f"{fix_rtl('نام تم فعال')}: {theme.theme_name}",
+    ):
+        lbl = Label(text=text, font_name=theme.font_name, font_size='11sp',
+                    color=theme.text_secondary, halign='right', size_hint_y=None, height=dp(20))
+        lbl.bind(size=lambda inst, *a: setattr(inst, 'text_size', (inst.width, None)))
+        debug_card.add_widget(lbl)
+    container.add_widget(debug_card)
+
+    container.add_widget(_section_label('ابزارهای دیباگ'))
+    verbose_card = SettingsCard(
+        icon='🐞', title_text=fix_rtl('لاگ‌های پرحجم موتور مدل'),
+        description_text=fix_rtl('نمایش خروجی کامل llama.cpp در کنسول (فقط برای دیباگ)'),
+        control=_make_switch(False, lambda v: _toggle_verbose_engine(brain, v)),
+    )
+    container.add_widget(verbose_card)
+
+    reset_onboarding_btn = SecondaryButton(text=fix_rtl('نمایش مجدد صفحه‌ی خوشامدگویی'))
+    reset_onboarding_btn.bind(on_release=lambda *a: (
+        app.memory.set_flag('onboarding_seen', ''), _show_toast('در اجرای بعدی برنامه نمایش داده می‌شود')
+    ))
+    container.add_widget(reset_onboarding_btn)
+
+
+def _toggle_verbose_engine(brain, enabled):
+    try:
+        if brain.engine._lib:
+            brain.engine._lib.vina_llm_set_verbose(1 if enabled else 0)
+    except Exception:
+        pass
+
+
+# ==========================================================================
 # درباره (About)
 # ==========================================================================
 def build_about(container):
@@ -477,13 +624,17 @@ def build_about(container):
 
 
 SECTION_BUILDERS = {
+    'general': build_general,
     'appearance': build_appearance,
+    'themes': build_themes,
     'ai_model': build_ai_model,
     'voice': build_voice,
     'chat': build_chat,
     'memory': build_memory,
     'storage': build_storage,
+    'performance': build_performance,
     'privacy': build_privacy,
     'notifications': build_notifications,
+    'developer': build_developer,
     'about': build_about,
 }

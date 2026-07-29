@@ -309,3 +309,38 @@ class StatisticsCard(GlassCard):
 # نام مستعار برای وضوح بیشتر در بخش حافظه (همان ساختار StatisticsCard)
 class MemoryCard(StatisticsCard):
     pass
+
+
+# ==========================================================================
+# نام‌های مستعار معنایی برای کارت‌های صفحه‌ی خانه (Home Screen Components)
+# ==========================================================================
+# این کلاس‌ها به‌جای بازنویسی، روی کامپوننت‌های عمومی بالا لایه‌ی معنایی
+# مخصوص صفحه‌ی خانه اضافه می‌کنند تا هم کد تکراری نشود و هم نام‌گذاری در
+# محل استفاده (src/screens/home.py) گویا و مطابق مستندات طراحی باشد.
+# توجه: RecentConversationCard و PinnedChatCard در chat.py تعریف شده‌اند
+# (چون به ConversationCard نیاز دارند و از اینجا import کردنشان باعث
+# وابستگی چرخه‌ای می‌شود).
+
+class WelcomeCard(GlassCard):
+    """کارت خوش‌آمدگویی صفحه‌ی خانه (آواتار هوش مصنوعی + پیام خوشامد)"""
+    pass
+
+
+class QuickActionCard(FeatureCard):
+    """کارت اکشن سریع صفحه‌ی خانه (نام مستعار روی FeatureCard)"""
+    pass
+
+
+class ModelStatusCard(ModelCard):
+    """کارت وضعیت مدل هوش مصنوعی در صفحه‌ی خانه (نام مستعار روی ModelCard)"""
+    pass
+
+
+class MemoryStatusCard(StatisticsCard):
+    """کارت وضعیت حافظه (تعداد مکالمات/یادداشت‌ها) در صفحه‌ی خانه"""
+    pass
+
+
+class StorageStatusCard(StatisticsCard):
+    """کارت وضعیت فضای ذخیره‌سازی (حجم مدل‌ها/کش/حافظه) در صفحه‌ی خانه"""
+    pass

@@ -17,20 +17,33 @@ from src.screens.base import MainTabScreen
 from src.text_utils import fix_rtl
 
 SETTINGS_SECTIONS = [
-    {'key': 'appearance', 'icon': '🎨', 'title': 'ظاهر برنامه', 'desc': 'تم، رنگ، فونت، انیمیشن'},
+    {'key': 'general', 'icon': '⚙', 'title': 'عمومی', 'desc': 'زبان برنامه و تنظیمات پایه'},
+    {'key': 'appearance', 'icon': '🎨', 'title': 'ظاهر برنامه', 'desc': 'رنگ اکسنت، فونت، شفافیت، انیمیشن'},
+    {'key': 'themes', 'icon': '🌈', 'title': 'تم‌ها', 'desc': 'انتخاب از میان تم‌های آماده یا پیروی از سیستم'},
     {'key': 'ai_model', 'icon': '🧠', 'title': 'مدل هوش مصنوعی', 'desc': 'بارگذاری، دما، حافظه‌ی مدل'},
     {'key': 'voice', 'icon': '🎙', 'title': 'صدا', 'desc': 'گفتار به متن، متن به گفتار'},
     {'key': 'chat', 'icon': '💬', 'title': 'چت', 'desc': 'حباب‌ها، تایپوگرافی، تراکم پیام'},
     {'key': 'memory', 'icon': '🗂', 'title': 'حافظه', 'desc': 'مشاهده، خروجی، پاک کردن'},
     {'key': 'storage', 'icon': '💾', 'title': 'فضای ذخیره‌سازی', 'desc': 'مدل‌ها، کش، پشتیبان‌گیری'},
+    {'key': 'performance', 'icon': '⚡', 'title': 'کارایی', 'desc': 'تعداد threadها، مصرف حافظه، سرعت'},
     {'key': 'privacy', 'icon': '🔒', 'title': 'حریم خصوصی', 'desc': 'مجوزها و داده‌های شخصی'},
     {'key': 'notifications', 'icon': '🔔', 'title': 'اعلان‌ها', 'desc': 'یادآوری‌ها و هشدارها'},
+    {'key': 'developer', 'icon': '🛠', 'title': 'گزینه‌های توسعه‌دهنده', 'desc': 'اطلاعات فنی و دیباگ'},
     {'key': 'about', 'icon': 'ℹ', 'title': 'درباره‌ی وینا', 'desc': 'نسخه و اطلاعات برنامه'},
 ]
 
 
+SECTION_GROUPS = [
+    ('پایه', ['general', 'appearance', 'themes']),
+    ('هوش مصنوعی و صدا', ['ai_model', 'voice', 'chat']),
+    ('داده و سیستم', ['memory', 'storage', 'performance']),
+    ('امنیت و اطلاع‌رسانی', ['privacy', 'notifications']),
+    ('پیشرفته', ['developer', 'about']),
+]
+
+
 class SettingsHubScreen(MainTabScreen):
-    """صفحه‌ی اصلی تنظیمات با لیست بخش‌ها"""
+    """صفحه‌ی اصلی تنظیمات با لیست بخش‌ها، گروه‌بندی‌شده در دسته‌های منطقی"""
 
     tab_name = 'settings'
 
@@ -48,21 +61,37 @@ class SettingsHubScreen(MainTabScreen):
 
         scroll = ScrollView(do_scroll_x=False, bar_color=theme.accent, bar_width=dp(3))
         body = BoxLayout(orientation='vertical', size_hint_y=None,
-                          padding=[dp(16), dp(8), dp(16), dp(24)], spacing=dp(10))
+                          padding=[dp(16), dp(8), dp(16), dp(24)], spacing=dp(8))
         body.bind(minimum_height=body.setter('height'))
 
-        for section in SETTINGS_SECTIONS:
-            card = SettingsCard(
-                icon=section['icon'],
-                title_text=fix_rtl(section['title']),
-                description_text=fix_rtl(section['desc']),
-                show_arrow=True,
-                on_release=lambda key=section['key']: self._open_section(key),
-            )
-            body.add_widget(card)
+        sections_by_key = {s['key']: s for s in SETTINGS_SECTIONS}
+        for group_title, keys in SECTION_GROUPS:
+            body.add_widget(self._make_group_label(group_title))
+            for key in keys:
+                section = sections_by_key.get(key)
+                if not section:
+                    continue
+                card = SettingsCard(
+                    icon=section['icon'],
+                    title_text=fix_rtl(section['title']),
+                    description_text=fix_rtl(section['desc']),
+                    show_arrow=True,
+                    on_release=lambda k=section['key']: self._open_section(k),
+                )
+                body.add_widget(card)
+            body.add_widget(BoxLayout(size_hint_y=None, height=dp(6)))
 
         scroll.add_widget(body)
         container.add_widget(scroll)
+
+    def _make_group_label(self, text):
+        from kivy.uix.label import Label
+        label = Label(
+            text=fix_rtl(text), font_name=theme.font_name, bold=True, font_size='12sp',
+            color=theme.text_disabled, size_hint_y=None, height=dp(26), halign='right',
+        )
+        label.bind(size=lambda inst, *a: setattr(inst, 'text_size', inst.size))
+        return label
 
     def _redraw_bg(self, instance, *args):
         self._bg_color.rgba = theme.bg_primary
