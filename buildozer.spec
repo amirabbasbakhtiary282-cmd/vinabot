@@ -81,7 +81,34 @@ p4a.local_recipes = ./p4a-recipes
 # حذف شده چون کراس‌کامپایل آن برای اندروید غیرقابل‌اعتماد است.
 requirements = python3,kivy==2.3.1,openssl,requests,beautifulsoup4,sqlite3,pyjnius,plyer,arabic_reshaper,python-bidi==0.4.2,pygments,android,llamacpp,vinallm,vosk
 
-android.gradle_dependencies =
+# نکته‌ی حیاتی: این کلید باید کاملاً **کامنت** بماند، نه اینکه خالی رها شود.
+#
+# چرا؟ (ریشه‌ی شکست بیلد شماره ۸ - تأییدشده با اجرای واقعی buildozer)
+# نوشتن «android.gradle_dependencies =» با مقدار خالی باعث می‌شود
+# SpecParser.getlist به‌جای لیست خالی، لیستی شامل یک رشته‌ی خالی برگرداند:
+#
+#     >>> p.getlist('app', 'android.gradle_dependencies', [])
+#     ['']
+#
+# دلیلش این است که getlist ابتدا مقدار را می‌گیرد ('' که None نیست، پس
+# default برگردانده نمی‌شود) و بعد ''.split(',') را صدا می‌زند که [''] است
+# (buildozer/specparser.py خطوط ۸۶-۹۲).
+#
+# سپس targets/android.py خط ۹۷۲ به ازای هر عضو یک «--depend» اضافه می‌کند:
+#
+#     '--depend', ''
+#
+# و آن رشته‌ی خالی داخل build.gradle به‌صورت implementation '' می‌نشیند و
+# Gradle با این خطا شکست می‌خورد:
+#
+#     Build file '.../dists/vinabot/build.gradle' line: 76
+#     Supplied String module notation '' is invalid.
+#
+# اگر روزی وابستگی Gradle لازم شد، این خط را از کامنت خارج کنید و مقدار
+# واقعی بدهید، مثلاً:
+#     android.gradle_dependencies = androidx.core:core:1.12.0
+#
+# android.gradle_dependencies =
 
 android.log_level = 2
 android.compile_sdk_version = 33

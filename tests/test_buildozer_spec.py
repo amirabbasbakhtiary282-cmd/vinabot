@@ -155,3 +155,95 @@ class TestExcludedDirs(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class TestNoEmptyListValuedKeys(unittest.TestCase):
+    """هیچ کلید لیستی نباید با مقدار خالی رها شود.
+
+    ریشه‌ی شکست بیلد شماره ۸ (تأییدشده با اجرای واقعی buildozer):
+
+        android.gradle_dependencies =
+
+    این خط به‌نظر «هیچ وابستگی‌ای» می‌آید، اما SpecParser.getlist در عمل
+    ``['']`` برمی‌گرداند نه ``[]``:
+
+        مقدار '' است که None نیست → default برگردانده نمی‌شود
+        ''.split(',') == ['']        (specparser.py خطوط ۸۶-۹۲)
+
+    بعد targets/android.py (خط ۹۷۲) به ازای هر عضو یک «--depend» اضافه
+    می‌کند، پس p4a آرگومان ``--depend ''`` می‌گیرد و آن رشته‌ی خالی داخل
+    build.gradle می‌نشیند. Gradle شکست می‌خورد:
+
+        Supplied String module notation '' is invalid.
+
+    نکته‌ی مهم: این کلیدها باید **کامنت** شوند، نه اینکه خالی بمانند.
+    """
+
+    # کلیدهایی که buildozer با getlist می‌خواند (از سورس buildozer
+    # استخراج شده‌اند). مقدار خالی برای این‌ها خطرناک است.
+    LIST_KEYS = (
+        'android.gradle_dependencies',
+        'android.add_jars',
+        'android.add_aars',
+        'android.add_src',
+        'android.add_activities',
+        'android.add_assets',
+        'android.add_resources',
+        'android.add_compile_options',
+        'android.add_gradle_repositories',
+        'android.add_packaging_options',
+        'android.features',
+        'android.permissions',
+        'android.res_xml',
+        'services',
+        'requirements',
+        'source.include_exts',
+        'source.exclude_exts',
+        'source.exclude_dirs',
+        'source.exclude_patterns',
+    )
+
+    def test_no_list_key_is_present_but_empty(self):
+        import re
+
+        with open(SPEC, encoding='utf-8') as f:
+            lines = f.readlines()
+
+        offenders = []
+        for number, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            match = re.match(r'^([A-Za-z0-9_.]+)\s*=\s*(.*)$', stripped)
+            if not match:
+                continue
+            key, value = match.group(1), match.group(2).strip()
+            if key in self.LIST_KEYS and value == '':
+                offenders.append(f'خط {number}: {key}')
+
+        self.assertEqual(
+            [], offenders,
+            'این کلیدهای لیستی مقدار خالی دارند و باعث می‌شوند buildozer '
+            'یک رشته‌ی خالی به p4a پاس بدهد (مثلاً --depend \'\') که Gradle '
+            'را می‌شکند. آن‌ها را کامنت کنید یا مقدار واقعی بدهید:\n  '
+            + '\n  '.join(offenders))
+
+    def test_gradle_dependencies_parses_to_empty_list(self):
+        """بررسی رفتار واقعی، نه فقط متن فایل.
+
+        اگر buildozer نصب باشد، دقیقاً همان تابعی که در بیلد اجرا می‌شود
+        صدا زده می‌شود تا مطمئن شویم [''] برنمی‌گردد.
+        """
+        try:
+            from buildozer.specparser import SpecParser
+        except Exception:
+            self.skipTest('buildozer نصب نیست')
+
+        parser = SpecParser()
+        parser.read(SPEC)
+        value = parser.getlist('app', 'android.gradle_dependencies', [])
+        self.assertNotIn(
+            '', value or [],
+            "getlist مقدار [''] برگرداند؛ این باعث «--depend ''» و شکست "
+            "Gradle با «Supplied String module notation '' is invalid» "
+            "می‌شود.")
