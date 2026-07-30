@@ -35,7 +35,12 @@ class VinaVoice:
         self._conversation = None
 
         if self.is_android:
-            self.bridge.set_tts_language_fa()
+            # مهم: نسخه‌ی *غیرمسدودکننده*. نسخه‌ی قبلی
+            # ``set_tts_language_fa()`` را مستقیم صدا می‌زد و چون این
+            # سازنده داخل ``VinaApp.build()`` روی ترد اصلی اجرا می‌شود،
+            # تا ۵ ثانیه رابط کاربری قفل می‌شد و اندروید برنامه را
+            # می‌کشت (کرش چند لحظه بعد از نمایش صفحه‌ی بارگذاری).
+            self.bridge.set_tts_language_fa_async()
 
     # ------------------------------------------------------------------
     # گویش (TTS)

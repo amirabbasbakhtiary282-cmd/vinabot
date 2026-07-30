@@ -25,6 +25,33 @@ def is_android():
         return False
 
 
+def _detach_jnius():
+    """جدا کردن ترد جاری از JVM (الزامی برای تردهای پس‌زمینه).
+
+    چرا لازم است؟ مستندات رسمی pyjnius:
+
+        «هر بار که یک ترد بومی در پایتون می‌سازید و از Pyjnius استفاده
+         می‌کنید، آن ترد به JVM وصل می‌شود. اما شما باید قبل از خروج از
+         ترد آن را جدا کنید؛ Pyjnius نمی‌تواند این کار را برایتان بکند.»
+
+    اگر جدا نشود، ART با این پیام کل پروسه را abort می‌کند:
+
+        Native thread exited without calling DetachCurrentThread
+        Runtime aborting...
+
+    نکته: pyjnius متد ``run`` کلاس ``threading.Thread`` را monkey-patch
+    می‌کند و در حالت عادی خودش detach را صدا می‌زند؛ اما این تضمین وقتی
+    از بین می‌رود که ترد با استثنا خارج شود یا در محیط‌های خاص patch
+    اعمال نشود. صدا زدن صریح آن بی‌خطر و مطمئن‌تر است.
+    """
+    try:
+        import jnius
+        jnius.detach()
+    except Exception:
+        # روی دسکتاپ یا وقتی pyjnius نیست، این یک no-op بی‌خطر است
+        pass
+
+
 class AndroidBridge:
     """پوششی یکپارچه روی APIهای اندروید با استفاده از pyjnius"""
 
@@ -121,8 +148,44 @@ class AndroidBridge:
             self._tts = None
         return self._tts
 
+    def set_tts_language_fa_async(self):
+        """نسخه‌ی غیرمسدودکننده‌ی set_tts_language_fa.
+
+        چرا این تابع اضافه شد؟ (علت کرش هنگام اجرا)
+        ------------------------------------------------------------------
+        ``_ensure_tts()`` تا ۵ ثانیه با ``ready.wait(timeout=5.0)`` منتظر
+        آماده شدن موتور TTS می‌ماند. اگر این کار روی **ترد اصلی رابط
+        کاربری** انجام شود، حلقه‌ی رویداد اندروید قفل می‌شود و سیستم‌عامل
+        برنامه را با ANR/کرش می‌بندد - دقیقاً همان رفتاری که کاربر دید:
+        «Loading» نمایش داده می‌شود و بعد از حدود یک ثانیه برنامه می‌میرد.
+
+        راه‌حل: مقداردهی TTS به یک ترد پس‌زمینه منتقل می‌شود تا ترد اصلی
+        هرگز بلاک نشود.
+        """
+        if not self._android:
+            return
+
+        def _worker():
+            try:
+                self.set_tts_language_fa()
+            except Exception as exc:
+                print(f"وینا: مقداردهی TTS ناموفق بود: {exc}")
+            finally:
+                # pyjnius هر ترد بومی را به JVM وصل می‌کند و باید قبل از
+                # خروج جدا شود، وگرنه ART با «native thread exited without
+                # detaching» کل پروسه را abort می‌کند.
+                _detach_jnius()
+
+        import threading as _threading
+        _threading.Thread(target=_worker, daemon=True,
+                          name='vina-tts-init').start()
+
     def set_tts_language_fa(self):
-        """تلاش برای تنظیم زبان فارسی؛ در صورت نبود، پیش‌فرض دستگاه حفظ می‌شود"""
+        """تلاش برای تنظیم زبان فارسی؛ در صورت نبود، پیش‌فرض دستگاه حفظ می‌شود
+
+        هشدار: این تابع مسدودکننده است (تا ۵ ثانیه). آن را روی ترد اصلی
+        صدا نزنید؛ به‌جایش از ``set_tts_language_fa_async`` استفاده کنید.
+        """
         tts = self._ensure_tts()
         if not tts:
             return False

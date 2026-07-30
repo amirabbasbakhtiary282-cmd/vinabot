@@ -138,14 +138,28 @@ class LlmEngine:
                 self.loaded = False
                 return False
 
-            if not self._load_native_lib():
+            try:
+                if not self._load_native_lib():
+                    self.loaded = False
+                    return False
+            except BaseException as exc:
+                # بارگذاری کتابخانه‌ی بومی می‌تواند به دلایل غیرمنتظره‌ای
+                # شکست بخورد (ناسازگاری معماری، نبود سمبل، حافظه‌ی کم).
+                # هیچ‌کدام نباید کل برنامه را ببندد؛ فقط قابلیت هوش
+                # مصنوعی غیرفعال می‌شود.
+                self.load_error = f"بارگذاری کتابخانه‌ی بومی ناموفق بود: {exc}"
                 self.loaded = False
                 return False
 
             err_buf = ctypes.create_string_buffer(512)
-            handle = self._lib.vina_llm_load(
-                model_path.encode('utf-8'), n_ctx, n_threads, err_buf, 512
-            )
+            try:
+                handle = self._lib.vina_llm_load(
+                    model_path.encode('utf-8'), n_ctx, n_threads, err_buf, 512
+                )
+            except BaseException as exc:
+                self.load_error = f"خطا هنگام بارگذاری مدل: {exc}"
+                self.loaded = False
+                return False
             if not handle:
                 self.load_error = err_buf.value.decode('utf-8', errors='replace')
                 self.loaded = False

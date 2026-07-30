@@ -1,0 +1,28 @@
+
+============================================================
+2026-07-30T15:05:12.539837
+Traceback (most recent call last):
+  File "/home/user/vinabot/main.py", line 86, in build
+    return self._build_ui()
+           ^^^^^^^^^^^^^^^^
+  File "/tmp/failsafe_test.py", line 17, in <lambda>
+    app._build_ui = lambda: (_ for _ in ()).throw(RuntimeError('شبیه‌سازی: خطای بحرانی راه‌اندازی'))
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/failsafe_test.py", line 17, in <genexpr>
+    app._build_ui = lambda: (_ for _ in ()).throw(RuntimeError('شبیه‌سازی: خطای بحرانی راه‌اندازی'))
+RuntimeError: شبیه‌سازی: خطای بحرانی راه‌اندازی
+
+
+============================================================
+2026-07-30T15:05:19.087267
+Traceback (most recent call last):
+  File "/home/user/vinabot/main.py", line 86, in build
+    return self._build_ui()
+           ^^^^^^^^^^^^^^^^
+  File "/tmp/failsafe_test.py", line 18, in <lambda>
+    app._build_ui = lambda: (_ for _ in ()).throw(RuntimeError('شبیه‌سازی: خطای بحرانی راه‌اندازی'))
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/failsafe_test.py", line 18, in <genexpr>
+    app._build_ui = lambda: (_ for _ in ()).throw(RuntimeError('شبیه‌سازی: خطای بحرانی راه‌اندازی'))
+RuntimeError: شبیه‌سازی: خطای بحرانی راه‌اندازی
+

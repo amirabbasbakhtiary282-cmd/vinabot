@@ -70,6 +70,28 @@ class VinaApp(App):
     current_hour = NumericProperty(datetime.now().hour)
 
     def build(self):
+        """نقطه‌ی ورود رابط کاربری.
+
+        این متد عمداً در یک try/except کامل پیچیده شده. دلیل: اگر
+        ``build()`` استثنا بدهد، Kivy بالا می‌آید و برنامه روی گوشی
+        **بی‌هیچ پیامی** بسته می‌شود - همان چیزی که کاربر به‌صورت «کرش
+        بلافاصله بعد از باز شدن» می‌بیند و چون لاگ در دسترس نیست، عیب‌یابی
+        تقریباً غیرممکن می‌شود.
+
+        با این تغییر، هر خطای غیرمنتظره به‌جای کرش، یک صفحه‌ی خطای خوانا
+        با متن کامل استثنا نشان می‌دهد. این هم برنامه را زنده نگه می‌دارد
+        و هم تشخیص علت را ممکن می‌کند بدون نیاز به logcat.
+        """
+        try:
+            return self._build_ui()
+        except Exception:
+            import traceback
+            details = traceback.format_exc()
+            print('وینا: خطای بحرانی هنگام ساخت رابط کاربری:\n' + details)
+            self._write_crash_log(details)
+            return self._build_failsafe_screen(details)
+
+    def _build_ui(self):
         self.title = self.app_title
         self.memory = VinaMemory()
         self.brain = VinaBrain(self.memory)
@@ -104,6 +126,67 @@ class VinaApp(App):
         Clock.schedule_once(lambda dt: self._request_runtime_permissions(), 0.5)
 
         return self.root_float_layout
+
+    def _write_crash_log(self, details):
+        """نوشتن جزئیات خطا در جایی که کاربر بتواند ببیند.
+
+        چون گرفتن logcat برای کاربر عادی عملی نیست، متن کامل خطا در
+        پوشه‌ی مدل‌ها (که کاربر با فایل‌منیجر به آن دسترسی دارد) ذخیره
+        می‌شود تا در صورت نیاز بتواند آن را بفرستد.
+        """
+        try:
+            from src import model_paths
+            import datetime as _dt
+            path = os.path.join(model_paths.get_models_dir(create=True),
+                                'vina_crash_log.txt')
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write('\n' + '=' * 60 + '\n')
+                f.write(_dt.datetime.now().isoformat() + '\n')
+                f.write(details + '\n')
+            print(f'وینا: گزارش خطا ذخیره شد: {path}')
+        except Exception:
+            pass
+
+    def _build_failsafe_screen(self, details):
+        """صفحه‌ی ساده‌ی خطا وقتی ساخت رابط اصلی شکست می‌خورد.
+
+        عمداً فقط از ابتدایی‌ترین ویجت‌های Kivy استفاده می‌کند تا حتی اگر
+        سیستم طراحی یا تم خراب باشد، همچنان نمایش داده شود.
+        """
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.label import Label
+        from kivy.uix.scrollview import ScrollView
+
+        root = BoxLayout(orientation='vertical', padding=16, spacing=10)
+
+        title = Label(
+            text='Vina AI - startup error',
+            size_hint_y=None, height=40, bold=True,
+            color=(1, 0.35, 0.35, 1),
+        )
+        root.add_widget(title)
+
+        hint = Label(
+            text=('The app could not start.\n'
+                  'Details were saved to vina_crash_log.txt\n'
+                  'inside the app models folder.'),
+            size_hint_y=None, height=70, halign='center',
+        )
+        hint.bind(size=lambda i, *a: setattr(i, 'text_size', i.size))
+        root.add_widget(hint)
+
+        scroll = ScrollView()
+        body = Label(
+            text=details, size_hint_y=None, font_size='11sp',
+            halign='left', valign='top',
+        )
+        body.bind(
+            texture_size=lambda i, v: setattr(i, 'height', v[1]),
+            width=lambda i, v: setattr(i, 'text_size', (v, None)),
+        )
+        scroll.add_widget(body)
+        root.add_widget(scroll)
+        return root
 
     def _request_runtime_permissions(self):
         """درخواست مجوزهای اجرایی لازم.
@@ -191,6 +274,19 @@ class VinaApp(App):
         threading.Thread(target=self._load_model_thread, daemon=True).start()
 
     def _load_model_thread(self):
+        try:
+            self._load_model_thread_inner()
+        finally:
+            # این ترد از طریق model_paths با JNI کار می‌کند
+            # (getExternalFilesDir). هر ترد بومی که به JVM وصل شود باید
+            # قبل از خروج جدا شود وگرنه ART کل پروسه را abort می‌کند.
+            try:
+                from src.android_bridge import _detach_jnius
+                _detach_jnius()
+            except Exception:
+                pass
+
+    def _load_model_thread_inner(self):
         try:
             Clock.schedule_once(
                 lambda dt: setattr(self, 'model_status', fix_rtl('در حال بارگذاری مدل زبانی...')), 0

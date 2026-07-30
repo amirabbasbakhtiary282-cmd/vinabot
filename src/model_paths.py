@@ -155,6 +155,16 @@ def ensure_models_dir():
     ندارد، پوشه از قبل ساخته شده باشد و کاربر بتواند فایل را داخلش کپی
     کند (خواسته‌ی صریح: «برنامه باید پوشه‌ی Models را خودکار بسازد»).
     """
+    # تلاش برای ساخت *همه‌ی* مسیرهای شناخته‌شده، نه فقط اولین مسیر قابل
+    # نوشتن. دلیل: کاربر ممکن است پوشه را با فایل‌منیجر در مسیر دیگری
+    # باز کند؛ اگر آن پوشه وجود نداشته باشد فکر می‌کند برنامه خراب است.
+    # ساخت پوشه‌ی خالی هزینه‌ای ندارد و شکست هر کدام بی‌خطر است.
+    for candidate in candidate_dirs():
+        try:
+            os.makedirs(candidate, exist_ok=True)
+        except Exception:
+            continue
+
     path = get_models_dir(create=True)
     # یک فایل راهنما کنار پوشه می‌گذاریم تا کاربر وقتی با فایل‌منیجر
     # آنجا را باز می‌کند بداند چه فایلی باید کپی کند.
@@ -188,17 +198,44 @@ def find_models():
         try:
             if not os.path.isdir(directory):
                 continue
-            for entry in sorted(os.listdir(directory)):
-                if not entry.lower().endswith(MODEL_EXT):
+
+            # جستجوی بازگشتی (حداکثر دو سطح) به‌جای فقط پوشه‌ی سطح اول.
+            # چرا؟ کاربران معمولاً فایل را داخل یک زیرپوشه می‌گذارند
+            # (مثلاً models/gemma/ یا وقتی یک آرشیو را استخراج می‌کنند).
+            # با جستجوی تک‌سطحی، مدل «پیدا نمی‌شد» در حالی که کاربر مطمئن
+            # بود آن را در جای درست گذاشته است. عمق محدود است تا اسکن
+            # کل حافظه‌ی گوشی طول نکشد.
+            for root, dirs, files in os.walk(directory):
+                depth = root[len(directory):].count(os.sep)
+                if depth >= 2:
+                    dirs[:] = []
                     continue
-                full = os.path.join(directory, entry)
-                if not os.path.isfile(full):
-                    continue
-                real = os.path.realpath(full)
-                if real in seen:
-                    continue
-                seen.add(real)
-                found.append(full)
+                # پوشه‌های مخفی/سیستمی را نادیده بگیر
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+
+                for entry in sorted(files):
+                    if not entry.lower().endswith(MODEL_EXT):
+                        continue
+                    full = os.path.join(root, entry)
+                    if not os.path.isfile(full):
+                        continue
+                    # فایل‌های نیمه‌کپی‌شده را نادیده بگیر
+                    if entry.endswith('.importing') or entry.endswith('.part'):
+                        continue
+                    try:
+                        # فقط فایل‌های *خالی* رد می‌شوند. عمداً آستانه‌ی
+                        # بزرگ‌تری نمی‌گذاریم: اگر مدل واقعی کاربر به هر
+                        # دلیلی کوچک باشد، پنهان کردنش بدتر از تلاش برای
+                        # بارگذاری و دادن پیام خطای روشن است.
+                        if os.path.getsize(full) == 0:
+                            continue
+                    except OSError:
+                        continue
+                    real = os.path.realpath(full)
+                    if real in seen:
+                        continue
+                    seen.add(real)
+                    found.append(full)
         except Exception:
             # یک پوشه‌ی غیرقابل خواندن نباید کل جستجو را خراب کند
             continue
