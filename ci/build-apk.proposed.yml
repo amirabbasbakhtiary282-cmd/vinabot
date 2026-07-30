@@ -194,7 +194,12 @@ jobs:
           grep -E "lib/.*\.so$" apk_contents.txt || true
 
           missing=0
-          for lib in libllama.so libvina_llm.so libc++_shared.so libpython3.11.so; do
+          # توجه: نام کتابخانه‌ی پایتون شامل شماره‌ی نسخه است و آن نسخه را
+          # python-for-android تعیین می‌کند، نه ما. در بیلد شماره ۹ مقدارش
+          # libpython3.14.so بود در حالی که این‌جا 3.11 هاردکد شده بود و
+          # باعث شد یک APK کاملاً سالم (۲۸ مگابایت) رد شود.
+          # پس به‌جای نسخه‌ی ثابت، با الگو بررسی می‌شود.
+          for lib in libllama.so libvina_llm.so libc++_shared.so libmain.so; do
             if grep -q "$lib" apk_contents.txt; then
               echo "موجود: $lib"
             else
@@ -202,6 +207,13 @@ jobs:
               missing=1
             fi
           done
+
+          if grep -qE "lib/.*/libpython3\.[0-9]+\.so" apk_contents.txt; then
+            echo "موجود: $(grep -oE 'libpython3\.[0-9]+\.so' apk_contents.txt | head -1)"
+          else
+            echo "::error::هیچ کتابخانه‌ی libpython3.X.so در APK نیست"
+            missing=1
+          fi
           [ "$missing" -eq 0 ] || exit 1
 
           # libvosk اختیاری است (تشخیص گفتار آفلاین)
